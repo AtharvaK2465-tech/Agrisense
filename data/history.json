@@ -1,0 +1,12 @@
+[
+  {
+    "label": "Area 1",
+    "diagnosis": "healthy",
+    "risk_level": "low",
+    "crop_type": "tur",
+    "crop_confidence": 0.307,
+    "district": "Chhatrapati Sambhajinagar (nearest match)",
+    "season": "kharif",
+    "saved_at": "2026-09-23T00:49:07"
+  }
+]
