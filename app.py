@@ -23,6 +23,9 @@ from utils.config import (
     is_gemini_mock,
     get_gemini_api_key,
     set_gemini_api_key,
+    get_sentinel_hub_credentials,
+    set_sentinel_hub_credentials,
+    is_sentinel_hub_mock,
 )
 from utils.crops import CROP_COLORS, CROP_DISPLAY_NAMES
 from utils.colormap import ndvi_to_rgba, confidence_to_rgba
@@ -364,9 +367,38 @@ with st.sidebar:
                 set_gemini_api_key(new_key.strip())
                 st.success("API Key saved to .env!")
                 st.rerun()
-        with col_k2:
-            if st.button("Clear Key", use_container_width=True):
-                set_gemini_api_key("")
+    st.divider()
+
+    # Sentinel Hub Configuration
+    sh_client_id, sh_client_secret = get_sentinel_hub_credentials()
+    if sh_client_id and sh_client_secret:
+        st.success("🛰️ Sentinel Hub API: **Live Mode**", icon="🟢")
+    else:
+        st.info("🧪 Sentinel Hub API: **Mock Mode**", icon="🧪")
+
+    with st.expander("Configure Sentinel Hub (Live Satellite)", expanded=not (bool(sh_client_id) and bool(sh_client_secret))):
+        st.caption("Enter Copernicus Sentinel Hub OAuth client credentials to ingest live Sentinel-2 L2A observations.")
+        new_sh_id = st.text_input(
+            "Client ID",
+            value=sh_client_id,
+            placeholder="e.g. 12345678-abcd-...",
+            help="From Sentinel Hub Dashboard -> User Settings -> OAuth Clients",
+        )
+        new_sh_sec = st.text_input(
+            "Client Secret",
+            value=sh_client_secret,
+            type="password",
+            placeholder="Client secret string...",
+        )
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            if st.button("Save Sentinel Keys", type="primary", use_container_width=True):
+                set_sentinel_hub_credentials(new_sh_id.strip(), new_sh_sec.strip())
+                st.success("Sentinel Hub credentials saved to .env!")
+                st.rerun()
+        with col_s2:
+            if st.button("Clear Sentinel Keys", use_container_width=True):
+                set_sentinel_hub_credentials("", "")
                 st.rerun()
 
     st.divider()

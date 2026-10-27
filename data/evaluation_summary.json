@@ -72,7 +72,7 @@
           "imagery_type": "synthetic",
           "external_apis_contacted": {
             "open_meteo": true,
-            "gemini": true,
+            "gemini": false,
             "sentinel_hub": false
           },
           "processing_type": "deterministic_synthetic_fixture",
@@ -85,7 +85,7 @@
           "crop_heuristic_score": 0.95,
           "crop_similarity_margin": 0.0,
           "scene_id": "SYNTH-S2L2A-9EB6FC3F",
-          "report_source": "gemini-live",
+          "report_source": "gemini-fallback-template",
           "scientific_validation": "passed",
           "pdf_generated": true,
           "vegetation_fraction": 0.0,

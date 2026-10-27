@@ -22,6 +22,52 @@ SENTINEL_HUB_MOCK = not (SENTINEL_HUB_CLIENT_ID and SENTINEL_HUB_CLIENT_SECRET)
 GEMINI_MOCK = not GEMINI_API_KEY
 
 
+import sys
+
+
+def get_sentinel_hub_credentials() -> tuple[str, str]:
+    mod = sys.modules.get("utils.config")
+    cid = getattr(mod, "SENTINEL_HUB_CLIENT_ID", SENTINEL_HUB_CLIENT_ID) or os.getenv("SENTINEL_HUB_CLIENT_ID", "")
+    sec = getattr(mod, "SENTINEL_HUB_CLIENT_SECRET", SENTINEL_HUB_CLIENT_SECRET) or os.getenv("SENTINEL_HUB_CLIENT_SECRET", "")
+    return cid, sec
+
+
+def is_sentinel_hub_mock() -> bool:
+    mod = sys.modules.get("utils.config")
+    return getattr(mod, "SENTINEL_HUB_MOCK", SENTINEL_HUB_MOCK)
+
+
+def set_sentinel_hub_credentials(client_id: str, client_secret: str) -> None:
+    global SENTINEL_HUB_CLIENT_ID, SENTINEL_HUB_CLIENT_SECRET, SENTINEL_HUB_MOCK
+    SENTINEL_HUB_CLIENT_ID = client_id
+    SENTINEL_HUB_CLIENT_SECRET = client_secret
+    SENTINEL_HUB_MOCK = not (bool(client_id) and bool(client_secret))
+    os.environ["SENTINEL_HUB_CLIENT_ID"] = client_id
+    os.environ["SENTINEL_HUB_CLIENT_SECRET"] = client_secret
+    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        cid_found, sec_found = False, False
+        new_lines = []
+        for line in lines:
+            if line.startswith("SENTINEL_HUB_CLIENT_ID="):
+                new_lines.append(f"SENTINEL_HUB_CLIENT_ID={client_id}\n")
+                cid_found = True
+            elif line.startswith("SENTINEL_HUB_CLIENT_SECRET="):
+                new_lines.append(f"SENTINEL_HUB_CLIENT_SECRET={client_secret}\n")
+                sec_found = True
+            else:
+                new_lines.append(line)
+        if not cid_found:
+            new_lines.append(f"SENTINEL_HUB_CLIENT_ID={client_id}\n")
+        if not sec_found:
+            new_lines.append(f"SENTINEL_HUB_CLIENT_SECRET={client_secret}\n")
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+    load_dotenv(override=True)
+
+
 def get_gemini_api_key() -> str:
     load_dotenv(override=True)
     return os.getenv("GEMINI_API_KEY", "")

@@ -82,12 +82,16 @@ _EVALSCRIPT_6BAND = """
 //VERSION=3
 function setup() {
   return {
-    input: ["B02", "B03", "B04", "B05", "B08", "B11"],
+    input: ["B02", "B03", "B04", "B05", "B08", "B11", "dataMask"],
     output: { bands: 6, sampleType: "FLOAT32" }
   };
 }
 function evaluatePixel(sample) {
-  // order: red, green, blue, nir, swir(B11), rededge(B05)
+  // If pixel is outside acquisition swath or nodata, return NaN across all 6 bands
+  if (sample.dataMask === 0) {
+    return [NaN, NaN, NaN, NaN, NaN, NaN];
+  }
+  // order: red (B04 665nm), green (B03 560nm), blue (B02 490nm), nir (B08 842nm), swir (B11 1610nm), rededge (B05 705nm)
   return [sample.B04, sample.B03, sample.B02, sample.B08, sample.B11, sample.B05];
 }
 """
@@ -98,22 +102,51 @@ def _bbox_from_polygon(polygon_geojson: dict):
     return shape(polygon_geojson).bounds  # (minx, miny, maxx, maxy)
 
 
+def _sanitize_error_msg(exc: Exception, client_id: str, client_secret: str) -> str:
+    """Masks credentials from exception messages to prevent secret leaks in logs."""
+    msg = str(exc)
+    if client_id:
+        msg = msg.replace(client_id, "***")
+    if client_secret:
+        msg = msg.replace(client_secret, "***")
+    return msg
+
+
 def _real_fetch_imagery(state: PipelineState) -> Tuple[np.ndarray, float, Dict[str, Any]]:
     """LIVE MODE — queries Sentinel Hub's Catalog API for the least-cloudy
     Sentinel-2 L2A scene in the requested date range over the drawn polygon,
-    then fetches a 6-band clip (RGB, NIR, SWIR, red-edge)."""
-    from sentinelhub import (
-        SHConfig, BBox, CRS, SentinelHubRequest, SentinelHubCatalog,
-        DataCollection, MimeType, bbox_to_dimensions,
-    )
-    from utils.config import SENTINEL_HUB_CLIENT_ID, SENTINEL_HUB_CLIENT_SECRET
+    then fetches a 6-band clip (RGB, NIR, SWIR, red-edge) via the Process API.
 
-    if not (SENTINEL_HUB_CLIENT_ID and SENTINEL_HUB_CLIENT_SECRET):
-        raise ValueError("Missing SENTINEL_HUB_CLIENT_ID or SENTINEL_HUB_CLIENT_SECRET.")
+    Spatial Resolution & Resampling:
+      - Bands B02, B03, B04, B08 have native 10m resolution.
+      - Bands B05 (RedEdge) and B11 (SWIR) have native 20m resolution.
+      - Sentinel Hub server-side processing resamples 20m bands to the requested 10m resolution.
+      - dataMask is inspected: nodata/out-of-swath pixels return NaN.
+    """
+    try:
+        from sentinelhub import (
+            SHConfig, BBox, CRS, SentinelHubRequest, SentinelHubCatalog,
+            DataCollection, MimeType, bbox_to_dimensions,
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "The 'sentinelhub' Python package is required for Live Mode. "
+            "Install with 'pip install sentinelhub'."
+        ) from exc
 
-    config = SHConfig()
-    config.sh_client_id = SENTINEL_HUB_CLIENT_ID
-    config.sh_client_secret = SENTINEL_HUB_CLIENT_SECRET
+    client_id, client_secret = config.get_sentinel_hub_credentials()
+
+    if not (client_id and client_secret):
+        raise ValueError(
+            "Missing Sentinel Hub credentials (SENTINEL_HUB_CLIENT_ID or SENTINEL_HUB_CLIENT_SECRET). "
+            "Please configure credentials in .env or environment variables to enable Live Mode."
+        )
+
+    sh_config = SHConfig()
+    sh_config.sh_client_id = client_id
+    sh_config.sh_client_secret = client_secret
+    sh_config.download_timeout_seconds = 30
+    sh_config.number_of_retries = 2
 
     minx, miny, maxx, maxy = _bbox_from_polygon(state["polygon_geojson"])
     bbox = BBox(bbox=(minx, miny, maxx, maxy), crs=CRS.WGS84)
@@ -121,47 +154,106 @@ def _real_fetch_imagery(state: PipelineState) -> Tuple[np.ndarray, float, Dict[s
     lon_span_km = (maxx - minx) * 105.0
     lat_span_km = (maxy - miny) * 111.0
     span_km = max(lon_span_km, lat_span_km, 0.5)
-    resolution = max((span_km * 1000) / 512, 10)  # meters/pixel, floor at native 10m
+    resolution = max((span_km * 1000) / 512, 10.0)  # meters/pixel, floor at native 10m
     size = bbox_to_dimensions(bbox, resolution=resolution)
     size = (min(size[0], 1024), min(size[1], 1024))
 
-    time_interval = (state["date_start"].isoformat(), state["date_end"].isoformat())
+    start_date = state["date_start"]
+    end_date = state["date_end"]
+    time_interval = (start_date.isoformat(), end_date.isoformat())
 
-    catalog = SentinelHubCatalog(config=config)
-    search_results = list(catalog.search(
-        DataCollection.SENTINEL2_L2A,
-        bbox=bbox,
-        time=time_interval,
-        fields={"include": ["id", "properties.datetime", "properties.eo:cloud_cover", "properties.grid:code"], "exclude": []},
-    ))
+    try:
+        catalog = SentinelHubCatalog(config=sh_config)
+        search_results = list(catalog.search(
+            DataCollection.SENTINEL2_L2A,
+            bbox=bbox,
+            time=time_interval,
+            fields={"include": ["id", "properties.datetime", "properties.eo:cloud_cover", "properties.grid:code"], "exclude": []},
+        ))
+    except Exception as exc:
+        clean_msg = _sanitize_error_msg(exc, client_id, client_secret)
+        if "401" in clean_msg or "403" in clean_msg or "InvalidClient" in clean_msg:
+            raise PermissionError(
+                "Sentinel Hub authentication failed (HTTP 401/403). "
+                "Verify SENTINEL_HUB_CLIENT_ID and SENTINEL_HUB_CLIENT_SECRET in .env."
+            ) from None
+        elif "429" in clean_msg or "RateLimit" in clean_msg:
+            raise RuntimeError("Sentinel Hub rate limit reached (HTTP 429). Please wait before retrying.") from None
+        elif "500" in clean_msg or "502" in clean_msg or "503" in clean_msg:
+            raise RuntimeError("Sentinel Hub service temporarily unavailable (HTTP 5xx). Copernicus servers may be busy.") from None
+        elif "timeout" in clean_msg.lower() or "timed out" in clean_msg.lower():
+            raise TimeoutError("Sentinel Hub request timed out. Check network connectivity.") from None
+        raise RuntimeError(f"Sentinel Hub catalog search failed: {clean_msg}") from None
+
     if not search_results:
         raise RuntimeError(
             f"No qualifying Sentinel-2 scenes found for this AOI between "
-            f"{state['date_start']} and {state['date_end']}. Try widening the date range."
+            f"{start_date} and {end_date}. Try widening the date range."
         )
+
     best_scene = min(search_results, key=lambda r: r["properties"].get("eo:cloud_cover", 100))
     cloud_cover = float(best_scene["properties"].get("eo:cloud_cover", 100))
+    scene_id = best_scene.get("id") or best_scene.get("properties", {}).get("id", "S2-L2A-LIVE")
+    scene_datetime = best_scene.get("properties", {}).get("datetime", end_date.isoformat())
+    tile = best_scene.get("properties", {}).get("grid:code", "Sentinel-2 MGRS")
 
-    request = SentinelHubRequest(
-        evalscript=_EVALSCRIPT_6BAND,
-        input_data=[SentinelHubRequest.input_data(
-            data_collection=DataCollection.SENTINEL2_L2A,
-            time_interval=time_interval,
-            mosaicking_order="leastCC",
-        )],
-        responses=[SentinelHubRequest.output_response("default", MimeType.TIFF)],
-        bbox=bbox,
-        size=size,
-        config=config,
-    )
-    raster = request.get_data()[0].astype(np.float32)
+    try:
+        request = SentinelHubRequest(
+            evalscript=_EVALSCRIPT_6BAND,
+            input_data=[SentinelHubRequest.input_data(
+                data_collection=DataCollection.SENTINEL2_L2A,
+                time_interval=time_interval,
+                mosaicking_order="leastCC",
+            )],
+            responses=[SentinelHubRequest.output_response("default", MimeType.TIFF)],
+            bbox=bbox,
+            size=size,
+            config=sh_config,
+        )
+        data_arrays = request.get_data()
+    except Exception as exc:
+        clean_msg = _sanitize_error_msg(exc, client_id, client_secret)
+        if "401" in clean_msg or "403" in clean_msg or "InvalidClient" in clean_msg:
+            raise PermissionError(
+                "Sentinel Hub Process API authentication failed (HTTP 401/403). "
+                "Check SENTINEL_HUB_CLIENT_ID and SENTINEL_HUB_CLIENT_SECRET in .env."
+            ) from None
+        elif "429" in clean_msg or "RateLimit" in clean_msg:
+            raise RuntimeError("Sentinel Hub rate limit reached (HTTP 429). Please wait before retrying.") from None
+        elif "500" in clean_msg or "502" in clean_msg or "503" in clean_msg:
+            raise RuntimeError("Sentinel Hub Process API error (HTTP 5xx). Service may be temporarily unavailable.") from None
+        elif "timeout" in clean_msg.lower() or "timed out" in clean_msg.lower():
+            raise TimeoutError("Sentinel Hub request timed out. Check network connectivity.") from None
+        raise RuntimeError(f"Sentinel Hub Process API fetch failed: {clean_msg}") from None
+
+    if not data_arrays or len(data_arrays) == 0:
+        raise RuntimeError("Sentinel Hub Process API returned an empty data response.")
+
+    raster = data_arrays[0].astype(np.float32)
+
+    # Validate raster dimensions and valid pixel fraction
+    if raster.ndim != 3 or raster.shape[-1] < 6:
+        raise ValueError(f"Sentinel Hub returned unexpected raster shape: {raster.shape}, expected (H, W, 6).")
+
+    valid_mask = np.isfinite(raster[..., 3]) & (raster[..., 3] > 0.0)
+    valid_fraction = float(np.mean(valid_mask)) if raster.size > 0 else 0.0
+    if valid_fraction < 0.01:
+        raise RuntimeError(
+            f"Retrieved Sentinel-2 imagery contains insufficient valid data ({valid_fraction:.1%} valid pixels). "
+            "The AOI may be fully cloud-obscured or fall outside the orbit swath boundary."
+        )
+
     scene_meta = {
-        "scene_id": best_scene.get("id") or best_scene.get("properties", {}).get("id", "S2-L2A-LIVE"),
-        "datetime": best_scene.get("properties", {}).get("datetime", state["date_end"].isoformat()),
-        "tile": best_scene.get("properties", {}).get("grid:code", "Sentinel-2 MGRS"),
-        "provider": "Copernicus Sentinel-2 L2A (Sentinel Hub)",
+        "scene_id": scene_id,
+        "datetime": scene_datetime,
+        "tile": tile,
+        "provider": "Copernicus Sentinel-2 L2A (Sentinel Hub Process API)",
         "cloud_cover": round(cloud_cover, 1),
         "is_synthetic": False,
+        "resolution_m": round(resolution, 1),
+        "bands_requested": ["B04", "B03", "B02", "B08", "B11", "B05"],
+        "resampling_note": "Sentinel-2 20m bands (B05, B11) resampled to 10m resolution via Sentinel Hub server-side interpolation",
+        "valid_pixel_ratio": round(valid_fraction, 3),
     }
     return raster, cloud_cover, scene_meta
 
@@ -318,7 +410,8 @@ def geo_agent(state: PipelineState) -> PipelineState:
     attempts = state.get("query_attempts", 0) + 1
     geo_fallback_note = None
 
-    if config.SENTINEL_HUB_MOCK:
+    is_mock = config.is_sentinel_hub_mock() if hasattr(config, "is_sentinel_hub_mock") else getattr(config, "SENTINEL_HUB_MOCK", True)
+    if is_mock:
         raster, cloud_cover, scene_meta = _mock_fetch_imagery(state)
         execution_mode = "mock"
         is_synthetic = True
@@ -360,6 +453,8 @@ def geo_agent(state: PipelineState) -> PipelineState:
         "indices_quality": indices["indices_quality"],
         "surface_fractions": indices["surface_fractions"],
         "valid_pixels_pct": indices["valid_pixels_pct"],
+        "resolution_m": scene_meta.get("resolution_m"),
+        "resampling_note": scene_meta.get("resampling_note"),
     }
 
     result: PipelineState = {
