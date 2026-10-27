@@ -1,114 +1,259 @@
 {
-  "scenarios": [
-    {
-      "scenario": "Akola",
-      "district": "Akola",
-      "season": "kharif",
-      "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
-      "risk_level": "low",
-      "crop_decision": "no_crop",
-      "crop_confidence": 0.95,
-      "execution_mode": "mock",
-      "is_synthetic": true,
-      "scene_id": "SYNTH-S2L2A-E10FA936",
-      "report_source": "gemini-live",
-      "scientific_validation": "passed",
-      "pdf_export_ok": true,
-      "vegetation_fraction": 0.0,
-      "status": "PASSED"
+  "evaluation_tiers": {
+    "tier_1_software_regression_tests": {
+      "status": "PASSED",
+      "scope": "Geometry validation, coordinate transformations, and Maharashtra boundary enforcement.",
+      "total_tests": 7,
+      "results": [
+        {
+          "scenario": "Akola",
+          "target_region": "Akola",
+          "tested_aspect": "geometry_boundary_enforcement",
+          "status": "PASSED (valid polygon within Maharashtra)"
+        },
+        {
+          "scenario": "Amravati",
+          "target_region": "Amravati",
+          "tested_aspect": "geometry_boundary_enforcement",
+          "status": "PASSED (valid polygon within Maharashtra)"
+        },
+        {
+          "scenario": "Nagpur",
+          "target_region": "Nagpur",
+          "tested_aspect": "geometry_boundary_enforcement",
+          "status": "PASSED (valid polygon within Maharashtra)"
+        },
+        {
+          "scenario": "Barshi",
+          "target_region": "Solapur",
+          "tested_aspect": "geometry_boundary_enforcement",
+          "status": "PASSED (valid polygon within Maharashtra)"
+        },
+        {
+          "scenario": "Khopoli",
+          "target_region": "Raigad",
+          "tested_aspect": "geometry_boundary_enforcement",
+          "status": "PASSED (valid polygon within Maharashtra)"
+        },
+        {
+          "scenario": "Wadhode",
+          "target_region": "Jalgaon",
+          "tested_aspect": "geometry_boundary_enforcement",
+          "status": "PASSED (valid polygon within Maharashtra)"
+        },
+        {
+          "scenario": "Indore",
+          "target_region": "Outside Maharashtra",
+          "tested_aspect": "geometry_boundary_enforcement",
+          "actual_execution_mode": "pre_pipeline_geometry_guard",
+          "imagery_type": "none (rejected prior to fetch)",
+          "external_apis_contacted": {
+            "open_meteo": false,
+            "gemini": false,
+            "sentinel_hub": false
+          },
+          "processing_type": "deterministic_geometry_fixture",
+          "scientific_validation": "N/A (out-of-bounds rejected)",
+          "pdf_generated": false,
+          "status": "PASSED (correctly rejected outside Maharashtra boundary)"
+        }
+      ]
     },
-    {
-      "scenario": "Amravati",
-      "district": "Amravati",
-      "season": "kharif",
-      "diagnosis": "Chlorophyll / Canopy Vigor Depression",
-      "risk_level": "medium",
-      "crop_decision": "cotton",
-      "crop_confidence": 0.359,
-      "execution_mode": "mock",
-      "is_synthetic": true,
-      "scene_id": "SYNTH-S2L2A-17E285FE",
-      "report_source": "gemini-live",
-      "scientific_validation": "passed",
-      "pdf_export_ok": true,
-      "vegetation_fraction": 0.749,
-      "status": "PASSED"
+    "tier_2_synthetic_mock_pipeline_tests": {
+      "status": "PASSED",
+      "scope": "End-to-end multi-agent orchestration, spectral index computations, uncertainty gating, report validation, and PDF generation on synthetic rasters.",
+      "total_scenarios": 7,
+      "scenarios": [
+        {
+          "scenario": "Akola",
+          "target_region": "Akola",
+          "tested_aspect": "application_logic_and_pipeline_orchestration",
+          "actual_execution_mode": "mock",
+          "imagery_type": "synthetic",
+          "external_apis_contacted": {
+            "open_meteo": true,
+            "gemini": true,
+            "sentinel_hub": false
+          },
+          "processing_type": "deterministic_synthetic_fixture",
+          "district": "Akola",
+          "season": "kharif",
+          "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+          "risk_level": "low",
+          "crop_decision": "no_crop",
+          "crop_decision_status": "no_crop",
+          "crop_heuristic_score": 0.95,
+          "crop_similarity_margin": 0.0,
+          "scene_id": "SYNTH-S2L2A-9EB6FC3F",
+          "report_source": "gemini-live",
+          "scientific_validation": "passed",
+          "pdf_generated": true,
+          "vegetation_fraction": 0.0,
+          "status": "PASSED"
+        },
+        {
+          "scenario": "Amravati",
+          "target_region": "Amravati",
+          "tested_aspect": "application_logic_and_pipeline_orchestration",
+          "actual_execution_mode": "mock",
+          "imagery_type": "synthetic",
+          "external_apis_contacted": {
+            "open_meteo": true,
+            "gemini": false,
+            "sentinel_hub": false
+          },
+          "processing_type": "deterministic_synthetic_fixture",
+          "district": "Amravati",
+          "season": "kharif",
+          "diagnosis": "Chlorophyll / Canopy Vigor Depression",
+          "risk_level": "medium",
+          "crop_decision": "uncertain",
+          "crop_decision_status": "uncertain",
+          "crop_heuristic_score": 0.271,
+          "crop_similarity_margin": 0.005,
+          "scene_id": "SYNTH-S2L2A-E30B760F",
+          "report_source": "gemini-fallback-template",
+          "scientific_validation": "passed",
+          "pdf_generated": true,
+          "vegetation_fraction": 0.754,
+          "status": "PASSED"
+        },
+        {
+          "scenario": "Nagpur",
+          "target_region": "Nagpur",
+          "tested_aspect": "application_logic_and_pipeline_orchestration",
+          "actual_execution_mode": "mock",
+          "imagery_type": "synthetic",
+          "external_apis_contacted": {
+            "open_meteo": true,
+            "gemini": false,
+            "sentinel_hub": false
+          },
+          "processing_type": "deterministic_synthetic_fixture",
+          "district": "Nagpur",
+          "season": "kharif",
+          "diagnosis": "Chlorophyll / Canopy Vigor Depression",
+          "risk_level": "medium",
+          "crop_decision": "uncertain",
+          "crop_decision_status": "uncertain",
+          "crop_heuristic_score": 0.339,
+          "crop_similarity_margin": 0.058,
+          "scene_id": "SYNTH-S2L2A-B15E14B1",
+          "report_source": "gemini-fallback-template",
+          "scientific_validation": "passed",
+          "pdf_generated": true,
+          "vegetation_fraction": 0.75,
+          "status": "PASSED"
+        },
+        {
+          "scenario": "Barshi",
+          "target_region": "Solapur",
+          "tested_aspect": "application_logic_and_pipeline_orchestration",
+          "actual_execution_mode": "mock",
+          "imagery_type": "synthetic",
+          "external_apis_contacted": {
+            "open_meteo": true,
+            "gemini": false,
+            "sentinel_hub": false
+          },
+          "processing_type": "deterministic_synthetic_fixture",
+          "district": "Solapur",
+          "season": "rabi",
+          "diagnosis": "Chlorophyll / Canopy Vigor Depression",
+          "risk_level": "medium",
+          "crop_decision": "fallow",
+          "crop_decision_status": "identified",
+          "crop_heuristic_score": 0.333,
+          "crop_similarity_margin": 0.164,
+          "scene_id": "SYNTH-S2L2A-A158F813",
+          "report_source": "gemini-fallback-template",
+          "scientific_validation": "passed",
+          "pdf_generated": true,
+          "vegetation_fraction": 0.751,
+          "status": "PASSED"
+        },
+        {
+          "scenario": "Khopoli",
+          "target_region": "Raigad",
+          "tested_aspect": "application_logic_and_pipeline_orchestration",
+          "actual_execution_mode": "mock",
+          "imagery_type": "synthetic",
+          "external_apis_contacted": {
+            "open_meteo": true,
+            "gemini": false,
+            "sentinel_hub": false
+          },
+          "processing_type": "deterministic_synthetic_fixture",
+          "district": "Raigad",
+          "season": "kharif",
+          "diagnosis": "Chlorophyll / Canopy Vigor Depression",
+          "risk_level": "medium",
+          "crop_decision": "soybean",
+          "crop_decision_status": "identified",
+          "crop_heuristic_score": 0.255,
+          "crop_similarity_margin": 0.085,
+          "scene_id": "SYNTH-S2L2A-F2644845",
+          "report_source": "gemini-fallback-template",
+          "scientific_validation": "passed",
+          "pdf_generated": true,
+          "vegetation_fraction": 0.753,
+          "status": "PASSED"
+        },
+        {
+          "scenario": "Wadhode",
+          "target_region": "Jalgaon",
+          "tested_aspect": "application_logic_and_pipeline_orchestration",
+          "actual_execution_mode": "mock",
+          "imagery_type": "synthetic",
+          "external_apis_contacted": {
+            "open_meteo": true,
+            "gemini": false,
+            "sentinel_hub": false
+          },
+          "processing_type": "deterministic_synthetic_fixture",
+          "district": "Jalgaon",
+          "season": "kharif",
+          "diagnosis": "Chlorophyll / Canopy Vigor Depression",
+          "risk_level": "medium",
+          "crop_decision": "tur",
+          "crop_decision_status": "identified",
+          "crop_heuristic_score": 0.364,
+          "crop_similarity_margin": 0.13,
+          "scene_id": "SYNTH-S2L2A-52F46F41",
+          "report_source": "gemini-fallback-template",
+          "scientific_validation": "passed",
+          "pdf_generated": true,
+          "vegetation_fraction": 0.754,
+          "status": "PASSED"
+        },
+        {
+          "scenario": "Indore",
+          "target_region": "Outside Maharashtra",
+          "tested_aspect": "geometry_boundary_enforcement",
+          "actual_execution_mode": "pre_pipeline_geometry_guard",
+          "imagery_type": "none (rejected prior to fetch)",
+          "external_apis_contacted": {
+            "open_meteo": false,
+            "gemini": false,
+            "sentinel_hub": false
+          },
+          "processing_type": "deterministic_geometry_fixture",
+          "scientific_validation": "N/A (out-of-bounds rejected)",
+          "pdf_generated": false,
+          "status": "PASSED (correctly rejected outside Maharashtra boundary)"
+        }
+      ]
     },
-    {
-      "scenario": "Nagpur",
-      "district": "Nagpur",
-      "season": "kharif",
-      "diagnosis": "Chlorophyll / Canopy Vigor Depression",
-      "risk_level": "medium",
-      "crop_decision": "tur",
-      "crop_confidence": 0.352,
-      "execution_mode": "mock",
-      "is_synthetic": true,
-      "scene_id": "SYNTH-S2L2A-8905B7B0",
-      "report_source": "gemini-live",
-      "scientific_validation": "passed",
-      "pdf_export_ok": true,
-      "vegetation_fraction": 0.759,
-      "status": "PASSED"
+    "tier_3_live_satellite_processing_tests": {
+      "status": "UNAVAILABLE",
+      "scope": "Live Copernicus Sentinel-2 L2A satellite retrieval and real-time band processing.",
+      "reason": "Sentinel Hub credentials (SENTINEL_HUB_CLIENT_ID / CLIENT_SECRET) are not configured. Cannot claim live verification without credentialed satellite pulls."
     },
-    {
-      "scenario": "Barshi",
-      "district": "Solapur",
-      "season": "rabi",
-      "diagnosis": "Chlorophyll / Canopy Vigor Depression",
-      "risk_level": "medium",
-      "crop_decision": "jowar",
-      "crop_confidence": 0.16,
-      "execution_mode": "mock",
-      "is_synthetic": true,
-      "scene_id": "SYNTH-S2L2A-9E26696D",
-      "report_source": "gemini-live",
-      "scientific_validation": "passed",
-      "pdf_export_ok": true,
-      "vegetation_fraction": 0.752,
-      "status": "PASSED"
-    },
-    {
-      "scenario": "Khopoli",
-      "district": "Raigad",
-      "season": "kharif",
-      "diagnosis": "Chlorophyll / Canopy Vigor Depression",
-      "risk_level": "medium",
-      "crop_decision": "uncertain",
-      "crop_confidence": 0.305,
-      "execution_mode": "mock",
-      "is_synthetic": true,
-      "scene_id": "SYNTH-S2L2A-680237D6",
-      "report_source": "gemini-live",
-      "scientific_validation": "passed",
-      "pdf_export_ok": true,
-      "vegetation_fraction": 0.752,
-      "status": "PASSED"
-    },
-    {
-      "scenario": "Wadhode",
-      "district": "Jalgaon",
-      "season": "kharif",
-      "diagnosis": "Chlorophyll / Canopy Vigor Depression",
-      "risk_level": "medium",
-      "crop_decision": "tur",
-      "crop_confidence": 0.402,
-      "execution_mode": "mock",
-      "is_synthetic": true,
-      "scene_id": "SYNTH-S2L2A-663F7533",
-      "report_source": "gemini-live",
-      "scientific_validation": "passed",
-      "pdf_export_ok": true,
-      "vegetation_fraction": 0.751,
-      "status": "PASSED"
-    },
-    {
-      "scenario": "Indore",
-      "status": "PASSED (Correctly rejected outside state)",
-      "district": "Outside",
-      "execution_mode": "N/A",
-      "scientific_validation": "N/A"
+    "tier_4_independent_crop_classification_accuracy_tests": {
+      "status": "UNAVAILABLE",
+      "scope": "Statistical crop classification accuracy against independently measured ground-truth polygons.",
+      "reason": "Ground-truth agricultural parcel surveys and field validation labels are unavailable. Heuristic scores represent curve similarity, not measured accuracy."
     }
-  ],
+  },
   "all_passed": true
 }

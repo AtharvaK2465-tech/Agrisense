@@ -91,6 +91,11 @@ def classify_ndvi_series(
       If return_distances is True:  (best_crop, {crop: similarity_score, ...}, {crop: rms_distance, ...})
     """
     series = np.asarray(series, dtype=float)
+    if series.ndim != 1 or len(series) < 4:
+        raise ValueError(f"Observed NDVI series requires at least 4 temporal observations, got shape {series.shape}.")
+    if not np.all(np.isfinite(series)):
+        raise ValueError("Observed NDVI series contains non-finite (NaN or Inf) values.")
+
     distances = {}
     for crop, ref in signatures.items():
         ref = np.asarray(ref, dtype=float)

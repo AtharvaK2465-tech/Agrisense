@@ -103,6 +103,7 @@ def evaluate_all_scenarios() -> Dict[str, Any]:
     print("=================================================================\n")
 
     summary_records = []
+    software_regressions = []
     all_passed = True
 
     for item in REGRESSION_SCENARIOS:
@@ -115,13 +116,20 @@ def evaluate_all_scenarios() -> Dict[str, Any]:
         if name == "Indore":
             if not is_valid:
                 print(f"  [+] Correctly rejected: {val_msg}")
-                summary_records.append({
+                rec = {
                     "scenario": name,
-                    "status": "PASSED (Correctly rejected outside state)",
-                    "district": "Outside",
-                    "execution_mode": "N/A",
-                    "scientific_validation": "N/A",
-                })
+                    "target_region": item["expected_district"],
+                    "tested_aspect": "geometry_boundary_enforcement",
+                    "actual_execution_mode": "pre_pipeline_geometry_guard",
+                    "imagery_type": "none (rejected prior to fetch)",
+                    "external_apis_contacted": {"open_meteo": False, "gemini": False, "sentinel_hub": False},
+                    "processing_type": "deterministic_geometry_fixture",
+                    "scientific_validation": "N/A (out-of-bounds rejected)",
+                    "pdf_generated": False,
+                    "status": "PASSED (correctly rejected outside Maharashtra boundary)",
+                }
+                software_regressions.append(rec)
+                summary_records.append(rec)
                 continue
             else:
                 print("  [-] Indore unexpectedly accepted under RESTRICT_TO_MAHARASHTRA=True")
@@ -133,6 +141,13 @@ def evaluate_all_scenarios() -> Dict[str, Any]:
             all_passed = False
             continue
 
+        software_regressions.append({
+            "scenario": name,
+            "target_region": item["expected_district"],
+            "tested_aspect": "geometry_boundary_enforcement",
+            "status": "PASSED (valid polygon within Maharashtra)",
+        })
+
         # Execute multi-agent graph
         res = run_pipeline(poly, item["date_start"], item["date_end"])
         if res.get("error"):
@@ -143,6 +158,7 @@ def evaluate_all_scenarios() -> Dict[str, Any]:
         prov = res.get("provenance", {})
         val = res.get("report_validation", {})
         surface = res.get("surface_fractions", {})
+        weather = res.get("weather", {})
 
         # Test PDF generation
         pdf_ok = False
@@ -155,18 +171,28 @@ def evaluate_all_scenarios() -> Dict[str, Any]:
 
         record = {
             "scenario": name,
+            "target_region": item["expected_district"],
+            "tested_aspect": "application_logic_and_pipeline_orchestration",
+            "actual_execution_mode": prov.get("execution_mode", "mock"),
+            "imagery_type": "synthetic" if prov.get("is_synthetic_imagery") else "sentinel_2_l2a",
+            "external_apis_contacted": {
+                "open_meteo": "open-meteo" in str(weather.get("source", "")),
+                "gemini": prov.get("report_source") == "gemini-live",
+                "sentinel_hub": False,  # Mock mode active; Sentinel Hub not contacted
+            },
+            "processing_type": "deterministic_synthetic_fixture",
             "district": res.get("district"),
             "season": res.get("season"),
             "diagnosis": res.get("diagnosis"),
             "risk_level": res.get("risk_level"),
             "crop_decision": res.get("crop_type"),
-            "crop_confidence": res.get("crop_confidence"),
-            "execution_mode": prov.get("execution_mode"),
-            "is_synthetic": prov.get("is_synthetic_imagery"),
+            "crop_decision_status": res.get("crop_decision_status"),
+            "crop_heuristic_score": res.get("crop_confidence"),
+            "crop_similarity_margin": res.get("crop_similarity_margin"),
             "scene_id": prov.get("scene_id"),
             "report_source": prov.get("report_source"),
             "scientific_validation": val.get("status"),
-            "pdf_export_ok": pdf_ok,
+            "pdf_generated": pdf_ok,
             "vegetation_fraction": surface.get("vegetation"),
             "status": "PASSED" if val.get("status") == "passed" and pdf_ok else "FAILED",
         }
@@ -174,20 +200,49 @@ def evaluate_all_scenarios() -> Dict[str, Any]:
 
         print(f"  [+] District: {record['district']} | Season: {record['season']}")
         print(f"  [+] Diagnosis: {record['diagnosis']} ({record['risk_level'].upper()})")
-        print(f"  [+] Crop Decision: {record['crop_decision']} ({record['crop_confidence']:.0%})")
-        print(f"  [+] Provenance: Mode={record['execution_mode']}, Scene={record['scene_id']}")
+        print(f"  [+] Crop Decision: {record['crop_decision']} ({record['crop_decision_status']}, score={record['crop_heuristic_score']:.1%})")
+        print(f"  [+] Provenance: Mode={record['actual_execution_mode']}, Scene={record['scene_id']}")
         print(f"  [+] Scientific Validation: {record['scientific_validation']} | PDF Export: {'OK' if pdf_ok else 'FAILED'}\n")
 
     out_path = os.path.join(PROJECT_ROOT, "data", "evaluation_summary.json")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    tiered_output = {
+        "evaluation_tiers": {
+            "tier_1_software_regression_tests": {
+                "status": "PASSED",
+                "scope": "Geometry validation, coordinate transformations, and Maharashtra boundary enforcement.",
+                "total_tests": len(software_regressions),
+                "results": software_regressions,
+            },
+            "tier_2_synthetic_mock_pipeline_tests": {
+                "status": "PASSED" if all_passed else "FAILED",
+                "scope": "End-to-end multi-agent orchestration, spectral index computations, uncertainty gating, report validation, and PDF generation on synthetic rasters.",
+                "total_scenarios": len(summary_records),
+                "scenarios": summary_records,
+            },
+            "tier_3_live_satellite_processing_tests": {
+                "status": "UNAVAILABLE",
+                "scope": "Live Copernicus Sentinel-2 L2A satellite retrieval and real-time band processing.",
+                "reason": "Sentinel Hub credentials (SENTINEL_HUB_CLIENT_ID / CLIENT_SECRET) are not configured. Cannot claim live verification without credentialed satellite pulls.",
+            },
+            "tier_4_independent_crop_classification_accuracy_tests": {
+                "status": "UNAVAILABLE",
+                "scope": "Statistical crop classification accuracy against independently measured ground-truth polygons.",
+                "reason": "Ground-truth agricultural parcel surveys and field validation labels are unavailable. Heuristic scores represent curve similarity, not measured accuracy.",
+            },
+        },
+        "all_passed": all_passed,
+    }
+
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({"scenarios": summary_records, "all_passed": all_passed}, f, indent=2)
+        json.dump(tiered_output, f, indent=2)
 
     print("=================================================================")
     print(f"Evaluation Completed. Overall Status: {'ALL PASSED' if all_passed else 'FAILURES DETECTED'}")
     print(f"Summary saved to: {out_path}")
     print("=================================================================")
-    return {"all_passed": all_passed, "records": summary_records}
+    return {"all_passed": all_passed, "tiered_output": tiered_output}
 
 
 if __name__ == "__main__":

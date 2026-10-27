@@ -11,6 +11,7 @@ import numpy as np
 from datetime import timedelta, date
 
 import utils.config as config
+import hashlib
 from utils.geo import validate_polygon, get_aoi_metadata
 from agents.state import PipelineState
 
@@ -18,7 +19,8 @@ from agents.state import PipelineState
 def _mock_fetch_imagery(state: PipelineState) -> Tuple[np.ndarray, float, Dict[str, Any]]:
     """Generates a deterministic 6-band (Red, Green, Blue, NIR, SWIR, RedEdge)
     synthetic raster seeded by the polygon, clearly labeled as synthetic in metadata."""
-    seed = abs(hash(str(state["polygon_geojson"]))) % (2**32)
+    h = hashlib.md5(str(state["polygon_geojson"]).encode("utf-8")).hexdigest()
+    seed = int(h[:8], 16)
     rng = np.random.default_rng(seed)
 
     from utils.districts import detect_ground_context
@@ -174,32 +176,69 @@ def _safe_normalized_difference(band_a: np.ndarray, band_b: np.ndarray) -> np.nd
     return np.clip(np.nan_to_num(ratio, nan=0.0, posinf=1.0, neginf=-1.0), -1.0, 1.0)
 
 
-def _compute_indices(raster: np.ndarray, is_synthetic: bool = False) -> Dict[str, Any]:
+DEFAULT_S2_BAND_MAPPING: Dict[str, int] = {
+    "red": 0,       # Sentinel-2 B04 (Red, 665nm, 10m native resolution)
+    "green": 1,     # Sentinel-2 B03 (Green, 560nm, 10m native resolution)
+    "blue": 2,      # Sentinel-2 B02 (Blue, 490nm, 10m native resolution)
+    "nir": 3,       # Sentinel-2 B08 (NIR, 842nm, 10m native resolution)
+    "swir": 4,      # Sentinel-2 B11 (SWIR-1, 1610nm, 20m resampled to 10m)
+    "rededge": 5,   # Sentinel-2 B05 (RedEdge-1, 705nm, 20m resampled to 10m)
+}
+
+
+def _compute_indices(
+    raster: np.ndarray,
+    is_synthetic: bool = False,
+    band_mapping: Optional[Dict[str, int]] = None,
+) -> Dict[str, Any]:
     """
     Calculates spectral indices (NDVI, NDMI, NDRE) and surface classification fractions.
-    Bands: 0: Red, 1: Green, 2: Blue, 3: NIR, 4: SWIR (B11), 5: RedEdge (B05).
-    Safeguard: If required bands are missing, NDMI or NDRE are marked unavailable with an explicit reason.
+    
+    Exact Sentinel-2 Band Mapping:
+      - NDVI: NIR (B08, 842nm) and Red (B04, 665nm) -> (NIR - Red) / (NIR + Red)
+      - NDMI: NIR (B08, 842nm) and SWIR (B11, 1610nm) -> (NIR - SWIR) / (NIR + SWIR)
+      - NDRE: NIR (B08, 842nm) and Red-Edge (B05, 705nm) -> (NIR - RedEdge) / (NIR + RedEdge)
+    
+    Safeguards:
+      - If required bands are missing or out of bounds, index is marked 'unavailable' with explicit reason.
+      - Never calculates an index from an incorrect band just because an array position exists.
+      - Handles non-finite values, zero denominators, and nodata safely.
     """
-    if raster.ndim != 3 or raster.shape[-1] < 4:
-        raise ValueError(f"Raster requires at least 4 bands (Red, Green, Blue, NIR), got shape {raster.shape}.")
+    if raster.ndim != 3 or raster.shape[0] == 0 or raster.shape[1] == 0:
+        raise ValueError(f"Raster requires a 3D array (H, W, Bands) with positive dimensions, got shape {raster.shape}.")
 
-    red = raster[..., 0]
-    nir = raster[..., 3]
+    mapping = band_mapping if band_mapping is not None else DEFAULT_S2_BAND_MAPPING
+    num_bands = raster.shape[-1]
+    indices_quality: Dict[str, Any] = {}
 
-    # NDVI: (NIR - Red) / (NIR + Red)
-    ndvi = _safe_normalized_difference(nir, red)
-    indices_quality: Dict[str, Any] = {
-        "ndvi": {
+    # 1. NDVI: NIR and Red
+    if "nir" in mapping and "red" in mapping and mapping["nir"] < num_bands and mapping["red"] < num_bands:
+        red = raster[..., mapping["red"]]
+        nir = raster[..., mapping["nir"]]
+        ndvi = _safe_normalized_difference(nir, red)
+        indices_quality["ndvi"] = {
             "status": "calculated",
             "bands": "B08 (NIR 842nm), B04 (Red 665nm)",
             "formula": "(NIR - Red) / (NIR + Red)",
             "is_synthetic": is_synthetic,
         }
-    }
+    else:
+        ndvi = None
+        missing = []
+        if "nir" not in mapping or mapping.get("nir", 999) >= num_bands:
+            missing.append("NIR (B08)")
+        if "red" not in mapping or mapping.get("red", 999) >= num_bands:
+            missing.append("Red (B04)")
+        indices_quality["ndvi"] = {
+            "status": "unavailable",
+            "reason": f"Required band(s) missing or out of bounds: {', '.join(missing)}.",
+            "is_synthetic": is_synthetic,
+        }
 
-    # NDMI: (NIR - SWIR) / (NIR + SWIR) -> Sentinel-2 B08 and B11
-    if raster.shape[-1] >= 5:
-        swir = raster[..., 4]
+    # 2. NDMI: NIR and SWIR (Sentinel-2 B08 and B11)
+    if "nir" in mapping and "swir" in mapping and mapping["nir"] < num_bands and mapping["swir"] < num_bands:
+        swir = raster[..., mapping["swir"]]
+        nir = raster[..., mapping["nir"]]
         ndmi = _safe_normalized_difference(nir, swir)
         indices_quality["ndmi"] = {
             "status": "calculated",
@@ -211,13 +250,14 @@ def _compute_indices(raster: np.ndarray, is_synthetic: bool = False) -> Dict[str
         ndmi = None
         indices_quality["ndmi"] = {
             "status": "unavailable",
-            "reason": "SWIR band (B11) not present in 4-band raster.",
-            "is_synthetic": False,
+            "reason": "SWIR band (B11 1610nm) not present in band mapping or raster dimensions.",
+            "is_synthetic": is_synthetic,
         }
 
-    # NDRE: (NIR - RedEdge) / (NIR + RedEdge) -> Sentinel-2 B08 and B05
-    if raster.shape[-1] >= 6:
-        rededge = raster[..., 5]
+    # 3. NDRE: NIR and Red-Edge (Sentinel-2 B08 and B05)
+    if "nir" in mapping and "rededge" in mapping and mapping["nir"] < num_bands and mapping["rededge"] < num_bands:
+        rededge = raster[..., mapping["rededge"]]
+        nir = raster[..., mapping["nir"]]
         ndre = _safe_normalized_difference(nir, rededge)
         indices_quality["ndre"] = {
             "status": "calculated",
@@ -229,26 +269,35 @@ def _compute_indices(raster: np.ndarray, is_synthetic: bool = False) -> Dict[str
         ndre = None
         indices_quality["ndre"] = {
             "status": "unavailable",
-            "reason": "Red-Edge band (B05) not present in raster.",
-            "is_synthetic": False,
+            "reason": "Red-Edge band (B05 705nm) not present in band mapping or raster dimensions.",
+            "is_synthetic": is_synthetic,
         }
 
     # Surface classification fractions across valid pixels
-    valid_pixels = np.isfinite(ndvi)
-    valid_count = int(np.sum(valid_pixels))
-    total_count = int(ndvi.size)
-    valid_pct = (valid_count / total_count * 100.0) if total_count > 0 else 0.0
+    if ndvi is not None:
+        valid_pixels = np.isfinite(ndvi)
+        valid_count = int(np.sum(valid_pixels))
+        total_count = int(ndvi.size)
+        valid_pct = (valid_count / total_count * 100.0) if total_count > 0 else 0.0
 
-    veg_mask = (ndvi >= 0.25) & valid_pixels
-    bare_mask = (ndvi >= 0.0) & (ndvi < 0.25) & valid_pixels
-    water_mask = (ndvi < 0.0) & valid_pixels
+        veg_mask = (ndvi >= 0.25) & valid_pixels
+        bare_mask = (ndvi >= 0.0) & (ndvi < 0.25) & valid_pixels
+        water_mask = (ndvi < 0.0) & valid_pixels
 
-    surface_fractions = {
-        "vegetation": round(float(np.mean(veg_mask)), 3),
-        "bare_surface": round(float(np.mean(bare_mask)), 3),
-        "water_surface": round(float(np.mean(water_mask)), 3),
-        "unclassified": round(float(1.0 - (valid_count / total_count)), 3) if total_count > 0 else 0.0,
-    }
+        surface_fractions = {
+            "vegetation": round(float(np.mean(veg_mask)), 3),
+            "bare_surface": round(float(np.mean(bare_mask)), 3),
+            "water_surface": round(float(np.mean(water_mask)), 3),
+            "unclassified": round(float(1.0 - (valid_count / total_count)), 3) if total_count > 0 else 0.0,
+        }
+    else:
+        valid_pct = 0.0
+        surface_fractions = {
+            "vegetation": 0.0,
+            "bare_surface": 0.0,
+            "water_surface": 0.0,
+            "unclassified": 1.0,
+        }
 
     return {
         "ndvi": ndvi,

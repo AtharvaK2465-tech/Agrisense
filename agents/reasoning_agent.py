@@ -45,22 +45,30 @@ def reasoning_agent(state: PipelineState) -> PipelineState:
             "Flat spectral reflectance corresponds to artificial turf, educational campus ground, pavement, or built-up soil, "
             "rather than crop failure or disease. No agricultural intervention is required."
         )
-    elif classification == "water_stress" and rainfall is not None:
-        if rainfall < 10:
-            reasoning_lines.append(
-                f"Low precipitation ({rainfall}mm recorded in the past {weather['days']} days) provides environmental "
-                "context consistent with potential canopy moisture deficit. Verify root-zone soil moisture in field "
-                "before altering irrigation schedules."
-            )
-            diagnosis = "Moisture Deficit Stress Pattern"
-            risk_level = "high"
+    elif classification == "water_stress":
+        if rainfall is not None:
+            if rainfall < 10:
+                reasoning_lines.append(
+                    f"Low precipitation ({rainfall}mm recorded in the past {weather['days']} days) provides environmental "
+                    "context consistent with potential canopy moisture deficit. Verify root-zone soil moisture in field "
+                    "before altering irrigation schedules."
+                )
+                diagnosis = "Moisture Deficit Stress Pattern"
+                risk_level = "high"
+            else:
+                reasoning_lines.append(
+                    f"Recent precipitation ({rainfall}mm in {weather['days']} days) indicates adequate ambient moisture. "
+                    "Observed canopy depression is therefore less likely to be a simple moisture deficit, and may reflect "
+                    "drainage issues, root waterlogging, or pest/foliar pressure. Physical field inspection recommended."
+                )
+                diagnosis = "Canopy Stress (Non-Drought Pattern)"
+                risk_level = "high"
         else:
             reasoning_lines.append(
-                f"Recent precipitation ({rainfall}mm in {weather['days']} days) indicates adequate ambient moisture. "
-                "Observed canopy depression is therefore less likely to be a simple moisture deficit, and may reflect "
-                "drainage issues, root waterlogging, or pest/foliar pressure. Physical field inspection recommended."
+                "Canopy moisture index depression (low NDMI) observed. Local rainfall records were unavailable "
+                "to provide meteorological context. Field inspection recommended to assess root-zone soil moisture directly."
             )
-            diagnosis = "Canopy Stress (Non-Drought Pattern)"
+            diagnosis = "Moisture Deficit Stress Pattern"
             risk_level = "high"
     elif classification == "disease":
         reasoning_lines.append(

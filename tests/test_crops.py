@@ -255,3 +255,72 @@ def test_scenario_14_agricultural_evidence_strong_but_crop_signatures_weak():
     _, scores, dists = classify_ndvi_series(flat_series, signatures=agri_signatures, return_distances=True)
     best_dist = min(dists.values())
     assert best_dist > 0.08  # significantly far from reference curves
+
+
+def test_classify_ndvi_series_validation():
+    """Short series (<4 stages) or non-finite values must raise ValueError."""
+    import pytest
+    with pytest.raises(ValueError, match="at least 4 temporal observations"):
+        classify_ndvi_series([0.3, 0.5, 0.6])
+
+    with pytest.raises(ValueError, match="non-finite"):
+        classify_ndvi_series([0.3, 0.5, np.nan, 0.7])
+
+
+def test_crop_agent_missing_temporal_observations_returns_unavailable():
+    """When temporal observations are missing (< 4 stages), decision status must be 'unavailable'."""
+    state = {
+        "polygon_geojson": HINGOLI_AGRI_POLYGON,
+        "date_start": date(2026, 6, 1),
+        "date_end": date(2026, 9, 15),
+        "ndvi": np.full((32, 32), 0.55, dtype=np.float32),
+        "ndmi": np.full((32, 32), 0.20, dtype=np.float32),
+        "ndre": np.full((32, 32), 0.25, dtype=np.float32),
+        "cloud_cover": 5.0,
+        "ndvi_timeseries": [0.2, 0.4],  # Only 2 stages instead of 4
+    }
+    out = crop_agent(state)
+    assert out["crop_decision_status"] == "unavailable"
+    assert out["crop_type"] == "uncertain"
+    assert "Insufficient" in out["crop_decision_reason"]
+    assert out["crop_confidence"] == 0.0
+
+
+def test_crop_agent_nan_temporal_observations_returns_unavailable():
+    """When temporal observations contain NaN, decision status must be 'unavailable'."""
+    state = {
+        "polygon_geojson": HINGOLI_AGRI_POLYGON,
+        "date_start": date(2026, 6, 1),
+        "date_end": date(2026, 9, 15),
+        "ndvi": np.full((32, 32), 0.55, dtype=np.float32),
+        "ndmi": np.full((32, 32), 0.20, dtype=np.float32),
+        "ndre": np.full((32, 32), 0.25, dtype=np.float32),
+        "cloud_cover": 5.0,
+        "ndvi_timeseries": [0.2, 0.4, np.nan, 0.5],
+    }
+    out = crop_agent(state)
+    assert out["crop_decision_status"] == "unavailable"
+    assert out["crop_type"] == "uncertain"
+    assert "Insufficient" in out["crop_decision_reason"]
+
+
+def test_crop_agent_weak_candidate_match_yields_uncertain():
+    """When candidate scores are near-uniform/weak, do NOT confirm a crop merely because it scored highest."""
+    # A flat series of 0.25 produces very close, weak scores across candidates
+    state = {
+        "polygon_geojson": HINGOLI_AGRI_POLYGON,
+        "date_start": date(2026, 6, 1),
+        "date_end": date(2026, 9, 15),
+        "ndvi": np.full((32, 32), 0.32, dtype=np.float32),
+        "ndmi": np.full((32, 32), 0.15, dtype=np.float32),
+        "ndre": np.full((32, 32), 0.20, dtype=np.float32),
+        "cloud_cover": 5.0,
+        "ndvi_timeseries": [0.32, 0.32, 0.32, 0.32],
+    }
+    out = crop_agent(state)
+    assert out["agricultural_area"] is True
+    # Weak match must yield uncertain
+    assert out["crop_type"] == "uncertain"
+    assert out["crop_decision_status"] == "uncertain"
+    assert out["crop_score_type"] == "normalized_heuristic_similarity"
+

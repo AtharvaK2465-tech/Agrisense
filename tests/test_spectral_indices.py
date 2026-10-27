@@ -117,3 +117,64 @@ def test_surface_fractions_sum_and_categories():
     assert fractions["unclassified"] == 0.0
     total = fractions["vegetation"] + fractions["bare_surface"] + fractions["water_surface"] + fractions["unclassified"]
     assert pytest.approx(total, abs=1e-3) == 1.0
+
+
+def test_compute_indices_custom_band_mapping():
+    """Verify that specifying a custom band mapping correctly picks bands without assuming default order."""
+    h, w = 2, 2
+    # Custom 6-band order: [NIR, SWIR, RedEdge, Red, Green, Blue]
+    custom_raster = np.zeros((h, w, 6), dtype=np.float32)
+    custom_raster[..., 0] = 0.6  # NIR
+    custom_raster[..., 1] = 0.2  # SWIR
+    custom_raster[..., 2] = 0.3  # RedEdge
+    custom_raster[..., 3] = 0.1  # Red
+    custom_raster[..., 4] = 0.15 # Green
+    custom_raster[..., 5] = 0.1  # Blue
+
+    custom_mapping = {
+        "nir": 0,
+        "swir": 1,
+        "rededge": 2,
+        "red": 3,
+        "green": 4,
+        "blue": 5,
+    }
+    out = _compute_indices(custom_raster, band_mapping=custom_mapping)
+
+    # NDVI: (0.6 - 0.1) / (0.6 + 0.1) = 0.5 / 0.7 = 0.7143
+    assert pytest.approx(float(np.mean(out["ndvi"])), abs=1e-4) == 0.7143
+    # NDMI: (0.6 - 0.2) / (0.6 + 0.2) = 0.4 / 0.8 = 0.5000
+    assert pytest.approx(float(np.mean(out["ndmi"])), abs=1e-4) == 0.5000
+    # NDRE: (0.6 - 0.3) / (0.6 + 0.3) = 0.3 / 0.9 = 0.3333
+    assert pytest.approx(float(np.mean(out["ndre"])), abs=1e-4) == 0.3333
+    assert out["indices_quality"]["ndvi"]["status"] == "calculated"
+    assert out["indices_quality"]["ndmi"]["status"] == "calculated"
+    assert out["indices_quality"]["ndre"]["status"] == "calculated"
+
+
+def test_compute_indices_mismatched_band_mapping_returns_unavailable():
+    """When a band mapping omits a band or references an out-of-bounds band index,
+    the index must be set to None with status 'unavailable' and an explicit reason."""
+    h, w = 2, 2
+    raster = np.zeros((h, w, 4), dtype=np.float32)
+    raster[..., 0] = 0.1 # Red
+    raster[..., 3] = 0.6 # NIR
+
+    # Mismatched mapping: NIR points to index 99 (out of bounds)
+    mismatched_mapping = {"red": 0, "green": 1, "blue": 2, "nir": 99}
+    out = _compute_indices(raster, band_mapping=mismatched_mapping)
+
+    assert out["ndvi"] is None
+    assert out["indices_quality"]["ndvi"]["status"] == "unavailable"
+    assert "out of bounds" in out["indices_quality"]["ndvi"]["reason"]
+    assert out["valid_pixels_pct"] == 0.0
+
+
+def test_compute_indices_invalid_dimensions_raises():
+    """Rasters with invalid dimensionality (< 3D or empty dimensions) must raise ValueError."""
+    with pytest.raises(ValueError, match="3D array"):
+        _compute_indices(np.zeros((10, 10), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="positive dimensions"):
+        _compute_indices(np.zeros((0, 10, 4), dtype=np.float32))
+

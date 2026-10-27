@@ -219,7 +219,15 @@ def report_agent(state: PipelineState) -> PipelineState:
     # Validate against scientific language rules
     validation = validate_report(raw_report, state)
     if not validation["is_valid"]:
-        raw_report = sanitize_report_violations(raw_report, validation["violations"])
+        # If Gemini generation violates scientific safeguards, fall back to compliant deterministic template
+        template_report = _mock_report(state, advisory_matches, is_live_failure=True)
+        template_report += (
+            "\n\n*(Note: Live LLM-generated text was rejected by the Scientific Report Validator "
+            f"({'; '.join(validation['violations'])}) and safely substituted with verified agronomic template).*"
+        )
+        raw_report = template_report
+        report_source = f"{report_source}-safeguard-fallback"
+        validation = validate_report(raw_report, state)
 
     provenance = dict(state.get("provenance", {}))
     provenance["report_source"] = report_source

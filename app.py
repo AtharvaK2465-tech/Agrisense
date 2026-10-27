@@ -169,7 +169,11 @@ def _render_area_result(label: str, result: dict, index: int):
     c2.metric("Assessed Risk", result["risk_level"].upper())
     c3.metric("Vision Consistency", f"{result['vision_confidence']:.0%}")
     c4.metric("Identified Crop / Ground", CROP_DISPLAY_NAMES.get(result.get("crop_type", ""), "—"))
-    c5.metric("Decision Confidence", f"{result.get('crop_confidence', 0):.0%}")
+    c5.metric(
+        "Similarity Score (Heuristic Ranking)",
+        f"{result.get('crop_confidence', 0):.0%}",
+        help="Relative heuristic similarity score derived from inverse RMS phenology distance. This is an explainable ranking weight, NOT a calibrated statistical probability.",
+    )
     
     aoi_info = prov.get("aoi", {})
     st.caption(

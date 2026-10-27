@@ -43,8 +43,12 @@ PHENOLOGY_STAGE_LABELS = ["Early season", "Vegetative", "Peak growth", "Late sea
 CONFIDENCE_TOLERANCE = 0.15
 
 
+import hashlib
+
+
 def _seeded_rng(polygon_geojson: dict, salt: str) -> np.random.Generator:
-    seed = abs(hash(str(polygon_geojson) + salt)) % (2**32)
+    h = hashlib.md5(f"{polygon_geojson}{salt}".encode("utf-8")).hexdigest()
+    seed = int(h[:8], 16)
     return np.random.default_rng(seed)
 
 
@@ -137,87 +141,115 @@ def crop_agent(state: PipelineState) -> PipelineState:
         # Evaluate agricultural candidate signatures only (never compare to 'no_crop')
         agri_signatures = {c: sig for c, sig in CROP_SIGNATURES.items() if c not in ("no_crop", "uncertain")}
 
-        series = _mock_phenology_series(polygon)
-        series[-1] = current_mean_ndvi
+        if "ndvi_timeseries" in state and state["ndvi_timeseries"] is not None:
+            series = list(state["ndvi_timeseries"])
+        else:
+            series = _mock_phenology_series(polygon)
+            series[-1] = current_mean_ndvi
 
-        # Compute RMS distances and normalized inverse-distance similarity weights
-        _, scores, distances = classify_ndvi_series(
-            series, signatures=agri_signatures, return_distances=True
-        )
-
-        sorted_candidates = sorted(distances.items(), key=lambda kv: kv[1])
-        best_cand, best_dist = sorted_candidates[0]
-        second_cand, second_dist = sorted_candidates[1]
-
-        best_score = scores[best_cand]
-        second_score = scores[second_cand]
-        similarity_margin = best_score - second_score
-
-        # =========================================================================
-        # STAGE 3: CONFIDENCE & UNCERTAINTY GATING
-        # =========================================================================
-        # 1. Absolute similarity check: does the observed series fit ANY signature?
-        # 2. Margin check: is the top candidate sufficiently separated from #2?
-        # 3. Contextual district/season check.
-        plausible = [c for c in plausible_crops(district, season) if c not in ("no_crop", "uncertain")]
-
-        if best_dist > CROP_MAX_RMS_DISTANCE:
-            # Curve morphology does not match any known reference signature closely
+        # Check for missing temporal observations or non-finite values
+        if len(series) < 4 or any(not np.isfinite(v) for v in series):
             best_crop = "uncertain"
-            crop_decision_status = "uncertain"
-            confidence = round(best_score, 3)
+            crop_decision_status = "unavailable"
+            confidence = 0.0
+            similarity_margin = 0.0
+            best_dist = 0.0
+            distances = {}
+            scores = {c: 0.0 for c in CROP_SIGNATURES}
+            sorted_candidates = [("uncertain", 0.0)]
             crop_decision_reason = (
-                f"Agricultural area detected, but temporal NDVI pattern deviates from reference "
-                f"crop signatures (RMS distance {best_dist:.3f} exceeds threshold {CROP_MAX_RMS_DISTANCE})."
-            )
-        elif similarity_margin < CROP_MIN_CONFIDENCE_MARGIN:
-            # Top two crops are too close to distinguish reliably (e.g. cotton vs soybean ambiguity)
-            best_crop = "uncertain"
-            crop_decision_status = "uncertain"
-            confidence = round(best_score, 3)
-            crop_decision_reason = (
-                f"Agricultural vegetation detected, but crop signatures for '{best_cand}' and "
-                f"'{second_cand}' are ambiguous (similarity margin {similarity_margin:.1%} is "
-                f"below discrimination threshold {CROP_MIN_CONFIDENCE_MARGIN:.1%})."
+                "Insufficient multi-temporal satellite observations across phenology cycle "
+                f"(requires 4 valid stages, received {len(series)})."
             )
         else:
-            # Clear mathematical winner with sufficient evidence
-            if plausible and best_cand not in plausible:
-                # Top match isn't standard for district/season; check if a plausible candidate is close
-                plausible_dists = {c: distances[c] for c in plausible if c in distances}
-                if plausible_dists:
-                    best_plausible = min(plausible_dists, key=plausible_dists.get)
-                    p_dist = plausible_dists[best_plausible]
-                    if p_dist <= CROP_MAX_RMS_DISTANCE and (p_dist - best_dist) <= 0.05:
-                        best_crop = best_plausible
-                        confidence = round(scores[best_plausible] * 0.90, 3)
-                        crop_decision_status = "identified"
-                        crop_decision_reason = (
-                            f"NDVI shape closest to '{best_cand}' but re-ranked to '{best_plausible}' "
-                            f"(RMS {p_dist:.3f}) to align with {district} {season} crop calendar."
-                        )
+            # Compute RMS distances and normalized inverse-distance similarity weights
+            _, scores, distances = classify_ndvi_series(
+                series, signatures=agri_signatures, return_distances=True
+            )
+
+            sorted_candidates = sorted(distances.items(), key=lambda kv: kv[1])
+            best_cand, best_dist = sorted_candidates[0]
+            second_cand, second_dist = sorted_candidates[1]
+
+            best_score = scores[best_cand]
+            second_score = scores[second_cand]
+            similarity_margin = best_score - second_score
+
+            # =========================================================================
+            # STAGE 3: CONFIDENCE & UNCERTAINTY GATING
+            # =========================================================================
+            # 1. Absolute similarity check: does the observed series fit ANY signature?
+            # 2. Margin check: is the top candidate sufficiently separated from #2?
+            # 3. Weak candidate check: does top candidate stand out from uniform ambient distribution?
+            # 4. Contextual district/season check.
+            plausible = [c for c in plausible_crops(district, season) if c not in ("no_crop", "uncertain")]
+
+            if best_dist > CROP_MAX_RMS_DISTANCE:
+                # Curve morphology does not match any known reference signature closely
+                best_crop = "uncertain"
+                crop_decision_status = "uncertain"
+                confidence = round(best_score, 3)
+                crop_decision_reason = (
+                    f"Agricultural area detected, but temporal NDVI pattern deviates from reference "
+                    f"crop signatures (RMS distance {best_dist:.3f} exceeds threshold {CROP_MAX_RMS_DISTANCE})."
+                )
+            elif similarity_margin < CROP_MIN_CONFIDENCE_MARGIN:
+                # Top two crops are too close to distinguish reliably (e.g. cotton vs soybean ambiguity)
+                best_crop = "uncertain"
+                crop_decision_status = "uncertain"
+                confidence = round(best_score, 3)
+                crop_decision_reason = (
+                    f"Agricultural vegetation detected, but crop signatures for '{best_cand}' and "
+                    f"'{second_cand}' are ambiguous (similarity margin {similarity_margin:.1%} is "
+                    f"below discrimination threshold {CROP_MIN_CONFIDENCE_MARGIN:.1%})."
+                )
+            elif best_score < 0.22:
+                # Top candidate score is barely above uniform distribution across 6 classes (1/6 = 16.7%)
+                best_crop = "uncertain"
+                crop_decision_status = "uncertain"
+                confidence = round(best_score, 3)
+                crop_decision_reason = (
+                    f"Weak candidate match: highest heuristic similarity score ({best_score:.1%}) "
+                    f"does not sufficiently distinguish '{best_cand}' from ambient distribution."
+                )
+            else:
+                # Clear mathematical winner with sufficient evidence
+                if plausible and best_cand not in plausible:
+                    # Top match isn't standard for district/season; check if a plausible candidate is close
+                    plausible_dists = {c: distances[c] for c in plausible if c in distances}
+                    if plausible_dists:
+                        best_plausible = min(plausible_dists, key=plausible_dists.get)
+                        p_dist = plausible_dists[best_plausible]
+                        if p_dist <= CROP_MAX_RMS_DISTANCE and (p_dist - best_dist) <= 0.05:
+                            best_crop = best_plausible
+                            confidence = round(scores[best_plausible], 3)
+                            crop_decision_status = "identified"
+                            crop_decision_reason = (
+                                f"NDVI shape closest to '{best_cand}' but re-ranked to '{best_plausible}' "
+                                f"(RMS {p_dist:.3f}) to align with {district} {season} crop calendar."
+                            )
+                        else:
+                            best_crop = "uncertain"
+                            confidence = round(scores[best_cand], 3)
+                            crop_decision_status = "uncertain"
+                            crop_decision_reason = (
+                                f"Satellite phenology best matches '{best_cand}', which is uncommon in "
+                                f"{district} during {season} season; marked uncertain to prevent unvalidated claims."
+                            )
                     else:
-                        best_crop = "uncertain"
-                        confidence = round(scores[best_cand] * 0.75, 3)
-                        crop_decision_status = "uncertain"
-                        crop_decision_reason = (
-                            f"Satellite phenology best matches '{best_cand}', which is uncommon in "
-                            f"{district} during {season} season; marked uncertain to prevent unvalidated claims."
-                        )
+                        best_crop = best_cand
+                        confidence = round(best_score, 3)
+                        crop_decision_status = "identified"
+                        crop_decision_reason = f"Phenology match for '{best_cand}' (RMS distance {best_dist:.3f})."
                 else:
+                    # Strong match with calendar agreement
                     best_crop = best_cand
                     confidence = round(best_score, 3)
                     crop_decision_status = "identified"
-                    crop_decision_reason = f"Phenology match for '{best_cand}' (RMS distance {best_dist:.3f})."
-            else:
-                # Strong match with calendar agreement
-                best_crop = best_cand
-                confidence = round(min(best_score * 1.05, 0.97), 3)
-                crop_decision_status = "identified"
-                crop_decision_reason = (
-                    f"Strong phenology match for '{best_cand}' (RMS distance {best_dist:.3f}, "
-                    f"margin {similarity_margin:.1%}) with agricultural spatial support."
-                )
+                    crop_decision_reason = (
+                        f"Strong phenology match for '{best_cand}' (RMS distance {best_dist:.3f}, "
+                        f"margin {similarity_margin:.1%}) with agricultural spatial support."
+                    )
 
     # 3-year historical baseline comparison
     is_synth_imagery = state.get("provenance", {}).get("is_synthetic_imagery", True)
@@ -237,9 +269,10 @@ def crop_agent(state: PipelineState) -> PipelineState:
     # Expected NDVI at this stage for the decision
     if best_crop in CROP_SIGNATURES:
         expected_ndvi = CROP_SIGNATURES[best_crop][-1]
+    elif agricultural_area and sorted_candidates and sorted_candidates[0][0] in CROP_SIGNATURES:
+        expected_ndvi = CROP_SIGNATURES[sorted_candidates[0][0]][-1]
     else:
-        # For 'uncertain', use mean of top candidate or general active canopy
-        expected_ndvi = CROP_SIGNATURES[sorted_candidates[0][0]][-1] if agricultural_area else 0.10
+        expected_ndvi = 0.10
 
     confidence_map = 1.0 - np.abs(ndvi - expected_ndvi) / CONFIDENCE_TOLERANCE
     confidence_map = np.clip(confidence_map, 0.0, 1.0)
@@ -268,7 +301,9 @@ def crop_agent(state: PipelineState) -> PipelineState:
         "crop_decision_status": crop_decision_status,
         "crop_decision_reason": crop_decision_reason,
         "crop_similarity_margin": round(float(similarity_margin), 3) if agricultural_area else 0.0,
+        "crop_score_type": "normalized_heuristic_similarity",
         "crop_evidence": {
+            "score_type": "normalized_heuristic_similarity (inverse RMS distance weighting)",
             "mean_ndvi": round(current_mean_ndvi, 3),
             "vegetation_fraction": round(veg_fraction, 3),
             "ground_category": ground_info.get("category", ""),
