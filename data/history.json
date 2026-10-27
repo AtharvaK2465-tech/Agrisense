@@ -1,5 +1,345 @@
 [
   {
+    "label": "Area 3",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "cotton",
+    "crop_confidence": 0.346,
+    "district": "Akola",
+    "season": "kharif",
+    "saved_at": "2026-09-24T21:47:29"
+  },
+  {
+    "label": "Area 2",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "fallow",
+    "crop_confidence": 0.331,
+    "district": "Akola",
+    "season": "kharif",
+    "saved_at": "2026-09-24T21:47:18"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T21:47:08"
+  },
+  {
+    "label": "Area 2",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "fallow",
+    "crop_confidence": 0.331,
+    "district": "Akola",
+    "season": "kharif",
+    "saved_at": "2026-09-24T21:46:01"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T21:45:52"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T21:43:43"
+  },
+  {
+    "label": "Area 2",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T12:23:01"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T12:22:58"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T12:22:13"
+  },
+  {
+    "label": "Area 2",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Akola",
+    "season": "kharif",
+    "saved_at": "2026-09-24T12:17:12"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Akola",
+    "season": "kharif",
+    "saved_at": "2026-09-24T12:17:05"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Akola",
+    "season": "kharif",
+    "saved_at": "2026-09-24T12:16:21"
+  },
+  {
+    "label": "Area 4",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Akola",
+    "season": "kharif",
+    "saved_at": "2026-09-24T12:00:27"
+  },
+  {
+    "label": "Area 3",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T12:00:21"
+  },
+  {
+    "label": "Area 2",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T12:00:18"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T12:00:11"
+  },
+  {
+    "label": "Area 3",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T11:58:52"
+  },
+  {
+    "label": "Area 2",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T11:58:42"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T11:58:35"
+  },
+  {
+    "label": "Area 2",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T11:57:52"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T11:57:45"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "No Crop Detected (Non-Agricultural Ground)",
+    "risk_level": "low",
+    "crop_type": "no_crop",
+    "crop_confidence": 0.95,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T11:56:12"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "soybean",
+    "crop_confidence": 0.202,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T11:22:20"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "soybean",
+    "crop_confidence": 0.231,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T11:15:51"
+  },
+  {
+    "label": "Area 2",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "jowar",
+    "crop_confidence": 0.131,
+    "district": "Pune",
+    "season": "kharif",
+    "saved_at": "2026-09-24T11:14:18"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "tur",
+    "crop_confidence": 0.333,
+    "district": "Jalna",
+    "season": "kharif",
+    "saved_at": "2026-09-24T11:14:05"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "tur",
+    "crop_confidence": 0.333,
+    "district": "Jalna",
+    "season": "kharif",
+    "saved_at": "2026-09-24T11:10:11"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "tur",
+    "crop_confidence": 0.445,
+    "district": "Chhatrapati Sambhajinagar",
+    "season": "kharif",
+    "saved_at": "2026-09-24T10:39:51"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "tur",
+    "crop_confidence": 0.427,
+    "district": "Akola",
+    "season": "kharif",
+    "saved_at": "2026-09-24T10:33:34"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "tur",
+    "crop_confidence": 0.141,
+    "district": "Washim",
+    "season": "kharif",
+    "saved_at": "2026-09-24T09:46:11"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "soybean",
+    "crop_confidence": 0.38,
+    "district": "Akola",
+    "season": "kharif",
+    "saved_at": "2026-09-23T22:24:06"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "cotton",
+    "crop_confidence": 0.37,
+    "district": "Amravati (nearest match)",
+    "season": "kharif",
+    "saved_at": "2026-09-23T16:55:16"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "cotton",
+    "crop_confidence": 0.336,
+    "district": "Amravati (nearest match)",
+    "season": "kharif",
+    "saved_at": "2026-09-23T16:00:56"
+  },
+  {
+    "label": "Area 1",
+    "diagnosis": "nutrient_deficiency",
+    "risk_level": "medium",
+    "crop_type": "tur",
+    "crop_confidence": 0.151,
+    "district": "Amravati (nearest match)",
+    "season": "kharif",
+    "saved_at": "2026-09-23T15:51:39"
+  },
+  {
     "label": "Area 1",
     "diagnosis": "healthy",
     "risk_level": "low",

@@ -29,7 +29,20 @@ DEMO_ADVISORIES = [
     {"district": "Pune", "crop": "soybean", "season": "kharif",
      "issue": "Pod borer activity", "risk": "medium",
      "note": "Demo reference entry — replace with a real advisory source."},
+    {"district": "Hingoli", "crop": "cotton", "season": "kharif",
+     "issue": "Pink bollworm monitoring & sucking pest incidence", "risk": "medium",
+     "note": "Marathwada regional Kharif advisory — Hingoli district."},
+    {"district": "Hingoli", "crop": "soybean", "season": "kharif",
+     "issue": "Yellow mosaic virus / Girdle beetle vigilance", "risk": "medium",
+     "note": "Marathwada regional Kharif advisory — Hingoli district."},
+    {"district": "Nanded", "crop": "cotton", "season": "kharif",
+     "issue": "Pink bollworm surveillance", "risk": "medium",
+     "note": "Marathwada regional advisory."},
+    {"district": "Parbhani", "crop": "soybean", "season": "kharif",
+     "issue": "Leaf miner & pod borer alert", "risk": "medium",
+     "note": "VNMKV Parbhani university agro-advisory."},
 ]
+
 
 
 def match_advisories(district: str, crop: str, season: str) -> list[dict]:

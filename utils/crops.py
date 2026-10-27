@@ -28,6 +28,7 @@ CROP_SIGNATURES = {
     "jowar": [0.22, 0.45, 0.60, 0.25],
     "tur": [0.20, 0.40, 0.58, 0.45],
     "fallow": [0.12, 0.15, 0.14, 0.13],
+    "no_crop": [0.08, 0.10, 0.11, 0.09],
 }
 
 CROP_DISPLAY_NAMES = {
@@ -37,11 +38,13 @@ CROP_DISPLAY_NAMES = {
     "jowar": "Jowar (Sorghum)",
     "tur": "Tur (Pigeon Pea)",
     "fallow": "Fallow / Bare Soil",
+    "no_crop": "No Crop (Non-Agricultural Ground)",
+    "uncertain": "Agricultural Area (Crop Uncertain)",
 }
 
 # Hex colors for the map legend / overlay, loosely following standard
 # agronomy map conventions (deep green = perennial cane, warm tones for
-# the shorter kharif crops, brown = bare/fallow).
+# the shorter kharif crops, brown = bare/fallow, neutral gray = built-up/ground, amber = uncertain).
 CROP_COLORS = {
     "sugarcane": "#1b7837",
     "cotton": "#fee08b",
@@ -49,16 +52,43 @@ CROP_COLORS = {
     "jowar": "#d73027",
     "tur": "#66c2a5",
     "fallow": "#8c6d31",
+    "no_crop": "#757575",
+    "uncertain": "#d97706",
+}
+
+REFERENCE_METADATA = {
+    "source": "Regional Agro-Meteorological & Phenology Models (ICRISAT / MPKV Rahuri / VNMKV Parbhani crop calendars)",
+    "version": "1.2",
+    "num_stages": 4,
+    "stages": ["Early season", "Vegetative", "Peak growth", "Late season"],
+    "limitations": (
+        "Deterministic 4-stage idealized NDVI curves for major Maharashtra crops. "
+        "This is an explainable geometric similarity heuristic, not a trained ML classifier, "
+        "and cannot substitute for local agronomic ground validation."
+    ),
 }
 
 
-def classify_ndvi_series(series, signatures: dict = CROP_SIGNATURES) -> tuple[str, dict]:
-    """Compares an observed NDVI time-series against each crop's reference
-    signature using root-mean-square distance, then converts distances to
-    a normalized confidence score via inverse-distance weighting — a
-    simple, fully explainable stand-in for a trained 1-NN/DTW classifier.
 
-    Returns (best_crop, {crop: confidence_score, ...}) where scores sum to 1.
+def classify_ndvi_series(
+    series, signatures: dict = CROP_SIGNATURES, return_distances: bool = False
+):
+    """Compares an observed NDVI time-series against each crop's reference
+    signature using root-mean-square (RMS) spectral distance:
+        RMS = sqrt(mean((series - reference)^2))
+
+    RMS distances are converted to normalized similarity weights using
+    inverse-distance weighting:
+        w_i = 1.0 / (d_i + eps),  similarity_i = w_i / sum(w)
+
+    SCIENTIFIC NOTE:
+    This is an explainable deterministic reference-signature similarity metric,
+    NOT a trained machine learning model and NOT a calibrated statistical probability.
+    Similarity scores reflect relative proximity in phenology feature space.
+
+    Returns:
+      If return_distances is False: (best_crop, {crop: similarity_score, ...})
+      If return_distances is True:  (best_crop, {crop: similarity_score, ...}, {crop: rms_distance, ...})
     """
     series = np.asarray(series, dtype=float)
     distances = {}
@@ -71,4 +101,6 @@ def classify_ndvi_series(series, signatures: dict = CROP_SIGNATURES) -> tuple[st
 
     scores = {crop: float(p) for crop, p in zip(distances.keys(), probs)}
     best = max(scores, key=scores.get)
+    if return_distances:
+        return best, scores, distances
     return best, scores

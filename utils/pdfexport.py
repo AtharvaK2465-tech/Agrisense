@@ -95,5 +95,5 @@ def build_pdf(report_markdown: str, meta: dict) -> bytes:
         else:
             _write_wrapped(pdf, _clean(line.replace("**", "")), line_height=6)
 
-    out = pdf.output(dest="S")
+    out = pdf.output()
     return bytes(out)

@@ -44,3 +44,27 @@ def test_oversized_polygon_rejected():
 def test_malformed_geojson_rejected():
     ok, msg = validate_polygon({"type": "Polygon", "coordinates": []})
     assert ok is False
+
+
+def test_wkt_polygon_validation():
+    from utils.geo import validate_polygon
+    wkt_poly = "POLYGON((72.8 19.0, 72.9 19.0, 72.9 19.1, 72.8 19.1, 72.8 19.0))"
+    ok, msg = validate_polygon(wkt_poly)
+    assert ok is True
+
+
+def test_point_radius_to_geojson():
+    from utils.geo import point_radius_to_geojson, validate_polygon
+    geom = point_radius_to_geojson(19.0, 72.8, radius_km=2.0)
+    ok, msg = validate_polygon(geom)
+    assert ok is True
+
+
+def test_get_aoi_metadata():
+    from utils.geo import get_aoi_metadata
+    meta = get_aoi_metadata(MUMBAI_SMALL_SQUARE)
+    assert "area_km2" in meta
+    assert "area_hectares" in meta
+    assert meta["area_km2"] > 0
+    assert 72.0 <= meta["centroid_lon"] <= 73.0
+    assert 18.0 <= meta["centroid_lat"] <= 20.0
