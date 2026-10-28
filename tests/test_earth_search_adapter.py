@@ -279,7 +279,21 @@ def test_compute_indices_scl_unpacking_and_surface_partition():
 
     # Verify index-usable percentage reflects exclusion of 2 shadow pixels (98 / 100 = 98.0%)
     assert qm["index_usable_pixel_pct"] == 98.0
-    # Agricultural usable excludes SCL 7 and SCL 2 (90 / 100 = 90.0%)
+    # Candidate SCL 4/5 analysis mask excludes SCL 7 and SCL 2 (90 / 100 = 90.0%)
     assert qm["crop_usable_pixel_pct"] == 90.0
+    assert qm["scl4_5_analysis_pct"] == 90.0
+
+    counts = res["pixel_counts"]
+    assert counts["scl4_vegetation_pixels"] == 60
+    assert counts["scl5_not_vegetated_pixels"] == 30
+    assert counts["scl4_5_analysis_pixels"] == 90
+    assert qm["scl4_vegetation_pct"] == 60.0
+    assert qm["scl5_not_vegetated_pct"] == 30.0
+
+    # Verify separate SCL 4 vs SCL 5 NDVI statistics
+    assert res["scl4_ndvi_stats"]["count"] == 60
+    assert pytest.approx(res["scl4_ndvi_stats"]["mean"], abs=1e-3) == 0.60
+    assert res["scl5_ndvi_stats"]["count"] == 30
+    assert pytest.approx(res["scl5_ndvi_stats"]["mean"], abs=1e-3) == 0.1111
 
 

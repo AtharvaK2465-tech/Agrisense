@@ -167,23 +167,41 @@ def validate_live_sentinel_integration(
         print(f"    Cloud Masking:       Unavailable ({qm.get('cloud_masking_reason', 'SCL missing')})")
     print(f"    Unclassified (SCL 7):{counts.get('unclassified_scl_pixels', 0)} ({qm.get('scl_unclassified_fraction_pct', 0.0):.4f}% of AOI, excluded from crop vigor)")
     print(f"    Water Pixels (SCL 6):{counts.get('water_pixels', 0)} ({qm.get('water_fraction_pct', 0.0):.4f}% of AOI, non-crop)")
-    print(f"    Crop-Suitable (4 & 5):{counts.get('crop_usable_pixels', 0)} ({qm.get('crop_usable_pixel_pct', 0.0):.4f}% of AOI, agricultural land)")
+    print(f"    SCL 4 (Vegetation):  {counts.get('scl4_vegetation_pixels', 0)} ({qm.get('scl4_vegetation_pct', 0.0):.4f}% of AOI, satellite classified vegetation)")
+    print(f"    SCL 5 (Not-Veg):     {counts.get('scl5_not_vegetated_pixels', 0)} ({qm.get('scl5_not_vegetated_pct', 0.0):.4f}% of AOI, bare soil / fallow / roads / rock)")
+    print(f"    SCL 4/5 Analysis:    {counts.get('crop_usable_pixels', 0)} ({qm.get('crop_usable_pixel_pct', 0.0):.4f}% of AOI, candidate analysis mask)")
     print(f"    Index-Usable Pixels: {counts.get('index_usable_pixels', 0)} ({qm.get('index_usable_pixel_pct', 0.0):.4f}% of AOI, clear-sky physical reflectance)")
 
-    print("\n--> Spectral Indices Analytical Verification:")
+    print("\n--> Spectral Indices & Heuristic Vegetation Thresholding:")
+    scl4_stats = indices.get("scl4_ndvi_stats")
+    scl5_stats = indices.get("scl5_ndvi_stats")
+    if scl4_stats:
+        print(f"    [+] SCL 4 (Classified Vegetation) NDVI:")
+        print(f"        - Count:  {scl4_stats['count']} pixels (100.0% of SCL 4, {scl4_stats['count']/counts.get('aoi_pixels', 1)*100:.2f}% of AOI)")
+        print(f"        - Stats:  Mean = {scl4_stats['mean']:+.3f}, Median = {scl4_stats['median']:+.3f} (Min: {scl4_stats['min']:+.3f}, Max: {scl4_stats['max']:+.3f})")
+        print(f"        - Above 0.25 heuristic threshold: {scl4_stats['above_025_pct']}%")
+
+    if scl5_stats:
+        print(f"    [+] SCL 5 (Classified Not-Vegetated) NDVI:")
+        print(f"        - Count:  {scl5_stats['count']} pixels (100.0% of SCL 5, {scl5_stats['count']/counts.get('aoi_pixels', 1)*100:.2f}% of AOI)")
+        print(f"        - Stats:  Mean = {scl5_stats['mean']:+.3f}, Median = {scl5_stats['median']:+.3f} (Min: {scl5_stats['min']:+.3f}, Max: {scl5_stats['max']:+.3f})")
+        print(f"        - Above 0.25 threshold: {scl5_stats['above_025_pct']}% [Sparse vegetation, weeds, or mixed soil-canopy]")
+        print(f"        - Below 0.25 threshold: {100.0 - scl5_stats['above_025_pct']:.2f}% [Bare soil, fallow, dark crusts down to -0.566]")
+
     if crop_ndvi is not None and np.any(np.isfinite(crop_ndvi)):
         c_vals = crop_ndvi[np.isfinite(crop_ndvi)]
         veg_mask = c_vals >= 0.25
         bare_mask = c_vals < 0.25
-        print(f"    [+] Agri Usable NDVI (SCL 4 & 5): Mean = {float(np.mean(c_vals)):+.3f}, Median = {float(np.median(c_vals)):+.3f} (Min: {float(np.min(c_vals)):+.3f}, Max: {float(np.max(c_vals)):+.3f})")
-        print(f"        - Vegetative Canopy (NDVI >= 0.25): {int(np.sum(veg_mask))} pixels ({np.sum(veg_mask)/len(c_vals)*100:.2f}%), Mean = {float(np.mean(c_vals[veg_mask])):+.3f}")
-        print(f"        - Bare Soil / Fallow (NDVI < 0.25): {int(np.sum(bare_mask))} pixels ({np.sum(bare_mask)/len(c_vals)*100:.2f}%), Mean = {float(np.mean(c_vals[bare_mask])):+.3f} (Min -0.566 in dark soil/crust)")
+        print(f"    [+] Combined SCL 4/5 Candidate Analysis Mask NDVI (Scope: SCL 4 + 5, 124,097 pixels):")
+        print(f"        - Overall Stats: Mean = {float(np.mean(c_vals)):+.3f}, Median = {float(np.median(c_vals)):+.3f} (Min: {float(np.min(c_vals)):+.3f}, Max: {float(np.max(c_vals)):+.3f})")
+        print(f"        - Estimated Vegetation (NDVI >= 0.25): {int(np.sum(veg_mask))} pixels ({np.sum(veg_mask)/len(c_vals)*100:.2f}% of SCL 4/5 mask, {np.sum(veg_mask)/counts.get('aoi_pixels', 1)*100:.2f}% of AOI)")
+        print(f"        - Estimated Low-Vigor / Bare (NDVI < 0.25): {int(np.sum(bare_mask))} pixels ({np.sum(bare_mask)/len(c_vals)*100:.2f}% of SCL 4/5 mask, {np.sum(bare_mask)/counts.get('aoi_pixels', 1)*100:.2f}% of AOI)")
     else:
-        print("    [-] Agri Usable NDVI:   Unavailable")
+        print("    [-] SCL 4/5 Candidate Analysis Mask NDVI: Unavailable")
 
     if ndvi is not None and np.any(np.isfinite(ndvi)):
         g_vals = ndvi[np.isfinite(ndvi)]
-        print(f"    [+] General Index NDVI: Mean = {float(np.mean(g_vals)):+.3f}, Median = {float(np.median(g_vals)):+.3f} (Min: {float(np.min(g_vals)):+.3f}, Max: {float(np.max(g_vals)):+.3f}) [Includes non-crop water/unclassified]")
+        print(f"    [+] General Index NDVI: Mean = {float(np.mean(g_vals)):+.3f}, Median = {float(np.median(g_vals)):+.3f} (Min: {float(np.min(g_vals)):+.3f}, Max: {float(np.max(g_vals)):+.3f}) [Scope: All clear-sky pixels incl. unclassified]")
 
     if ndmi is not None and np.any(np.isfinite(ndmi)):
         m_vals = ndmi[np.isfinite(ndmi)]
@@ -193,14 +211,17 @@ def validate_live_sentinel_integration(
         r_vals = ndre[np.isfinite(ndre)]
         print(f"    [+] NDRE (RedEdge):     Mean = {float(np.mean(r_vals)):+.3f}, Median = {float(np.median(r_vals)):+.3f} (Min: {float(np.min(r_vals)):+.3f}, Max: {float(np.max(r_vals)):+.3f})")
 
-    print(f"\n--> Surface Canopy Fractions (Relative to Total AOI):")
-    print(f"    Active Vegetation:   {fractions.get('vegetation', 0.0):.2%}")
-    print(f"    Bare Ground/Fallow:  {fractions.get('bare_surface', 0.0):.2%}")
-    print(f"    Water Surface:       {fractions.get('water_surface', 0.0):.2%}")
-    print(f"    Masked / Excluded:   {fractions.get('unclassified', 0.0):.2%}")
+    print(f"\n--> Surface Category Partition (Denominator: Total AOI Pixels = {counts.get('aoi_pixels', 0)}):")
+    print(f"    Estimated Vegetation (NDVI >= 0.25 in SCL 4/5): {fractions.get('vegetation', 0.0):.2%} (Heuristic threshold estimate)")
+    print(f"    Estimated Bare / Low-Vigor (NDVI < 0.25 in SCL 4/5): {fractions.get('bare_surface', 0.0):.2%} (Heuristic threshold estimate)")
+    print(f"    Water Surface (SCL 6):                          {fractions.get('water_surface', 0.0):.2%} (Confirmed non-water)")
+    print(f"    Masked / Excluded (SCL 7 unclassified + SCL 2): {fractions.get('unclassified', 0.0):.2%} (Quality excluded)")
     total_frac = sum(fractions.values())
-    print(f"    Sum of Fractions:    {total_frac:.2%} (Mutual partition of AOI)")
-    print(f"    Usable Coverage:     {indices.get('valid_pixels_pct', 0.0):.4f}%")
+    print(f"    Sum of Surface Fractions:                       {total_frac:.2%} (Exact mutual partition of AOI)")
+    print(f"    Candidate Analysis Coverage (SCL 4/5):          {indices.get('valid_pixels_pct', 0.0):.4f}% of AOI")
+    print("\n[*] Scientific Interpretation Caution:")
+    print("    SCL classes and empirical NDVI thresholds provide satellite spectral indicators, not confirmed")
+    print("    agricultural crop identities. Crop identification requires multi-temporal phenology and agronomic context.")
 
     print("\n=================================================================")
     print("[AGRISENSE] Live Sentinel-2 Validation Result: SUCCESS")

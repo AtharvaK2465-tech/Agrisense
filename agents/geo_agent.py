@@ -331,6 +331,9 @@ def evaluate_pixel_quality(
             "index_usable_mask": index_usable_mask,
             "crop_usable_mask": crop_usable_mask,
             "usable_mask": crop_usable_mask,
+            "scl4_vegetation_mask": vegetation_mask,
+            "scl5_not_vegetated_mask": not_vegetated_mask,
+            "scl4_5_analysis_mask": crop_usable_mask,
         },
         "counts": {
             "grid_pixels": n_grid,
@@ -345,6 +348,9 @@ def evaluate_pixel_quality(
             "water_pixels": n_water,
             "unclassified_scl_pixels": n_scl7,
             "snow_pixels": n_snow,
+            "scl4_vegetation_pixels": n_vegetation,
+            "scl5_not_vegetated_pixels": n_not_vegetated,
+            "scl4_5_analysis_pixels": n_crop_usable,
             "index_usable_pixels": n_index_usable,
             "crop_usable_pixels": n_crop_usable,
             "usable_pixels": n_crop_usable,
@@ -372,6 +378,12 @@ def evaluate_pixel_quality(
             "scl_unclassified_denominator": "Total AOI pixels" if scl7_pct is not None else "unavailable (SCL missing)",
             "snow_fraction_pct": snow_pct,
             "snow_denominator": "Total AOI pixels" if snow_pct is not None else "unavailable (SCL missing)",
+            "scl4_vegetation_pct": round((n_vegetation / n_aoi * 100.0), 4) if (scl is not None and n_aoi > 0) else None,
+            "scl4_vegetation_denominator": "Total AOI pixels",
+            "scl5_not_vegetated_pct": round((n_not_vegetated / n_aoi * 100.0), 4) if (scl is not None and n_aoi > 0) else None,
+            "scl5_not_vegetated_denominator": "Total AOI pixels",
+            "scl4_5_analysis_pct": crop_usable_pct,
+            "scl4_5_analysis_denominator": "Total AOI pixels",
             "index_usable_pixel_pct": index_usable_pct,
             "index_usable_denominator": "Total AOI pixels",
             "crop_usable_pixel_pct": crop_usable_pct,
@@ -914,9 +926,42 @@ def _compute_indices(
 
     valid_pct = quality_eval["metrics"]["usable_pixel_pct"] if ndvi is not None else 0.0
 
+    # SCL 4 (Classified Vegetation) vs SCL 5 (Classified Not-Vegetated) separate NDVI statistics
+    scl4_mask = quality_eval["masks"].get("scl4_vegetation_mask")
+    scl5_mask = quality_eval["masks"].get("scl5_not_vegetated_mask")
+    scl4_ndvi_stats = None
+    scl5_ndvi_stats = None
+    if ndvi is not None and scl4_mask is not None and np.any(scl4_mask):
+        s4_vals = ndvi[scl4_mask]
+        s4_vals = s4_vals[np.isfinite(s4_vals)]
+        if len(s4_vals) > 0:
+            scl4_ndvi_stats = {
+                "count": int(len(s4_vals)),
+                "mean": round(float(np.mean(s4_vals)), 4),
+                "median": round(float(np.median(s4_vals)), 4),
+                "min": round(float(np.min(s4_vals)), 4),
+                "max": round(float(np.max(s4_vals)), 4),
+                "above_025_pct": round(float(np.sum(s4_vals >= 0.25) / len(s4_vals) * 100.0), 2),
+            }
+    if ndvi is not None and scl5_mask is not None and np.any(scl5_mask):
+        s5_vals = ndvi[scl5_mask]
+        s5_vals = s5_vals[np.isfinite(s5_vals)]
+        if len(s5_vals) > 0:
+            scl5_ndvi_stats = {
+                "count": int(len(s5_vals)),
+                "mean": round(float(np.mean(s5_vals)), 4),
+                "median": round(float(np.median(s5_vals)), 4),
+                "min": round(float(np.min(s5_vals)), 4),
+                "max": round(float(np.max(s5_vals)), 4),
+                "above_025_pct": round(float(np.sum(s5_vals >= 0.25) / len(s5_vals) * 100.0), 2),
+            }
+
     return {
         "ndvi": ndvi,
         "crop_ndvi": crop_ndvi,
+        "scl4_5_ndvi": crop_ndvi,
+        "scl4_ndvi_stats": scl4_ndvi_stats,
+        "scl5_ndvi_stats": scl5_ndvi_stats,
         "ndmi": ndmi,
         "ndre": ndre,
         "indices_quality": indices_quality,
@@ -926,6 +971,7 @@ def _compute_indices(
         "pixel_counts": quality_eval["counts"],
         "usable_mask": crop_usable_mask,
         "crop_usable_mask": crop_usable_mask,
+        "scl4_5_analysis_mask": crop_usable_mask,
         "index_usable_mask": index_usable_mask,
     }
 
