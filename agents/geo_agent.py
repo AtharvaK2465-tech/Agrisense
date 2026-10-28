@@ -506,7 +506,7 @@ def _sanitize_error_msg(exc: Exception, client_id: str, client_secret: str) -> s
     return msg
 
 
-def _real_fetch_imagery(state: PipelineState) -> Tuple[np.ndarray, float, Dict[str, Any]]:
+def _fetch_imagery_sentinel_hub(state: PipelineState) -> Tuple[np.ndarray, float, Dict[str, Any]]:
     """LIVE MODE — queries Sentinel Hub's Catalog API for the least-cloudy
     Sentinel-2 L2A scene in the requested date range over the drawn polygon,
     then fetches a 6-band clip (RGB, NIR, SWIR, red-edge) via the Process API.
@@ -658,6 +658,30 @@ def _real_fetch_imagery(state: PipelineState) -> Tuple[np.ndarray, float, Dict[s
         "quality_metrics": quality_eval["metrics"],
     }
     return raster, cloud_cover, scene_meta
+
+
+def _real_fetch_imagery(
+    state: PipelineState,
+    provider: Optional[str] = None,
+) -> Tuple[np.ndarray, float, Dict[str, Any]]:
+    """
+    Unified live satellite imagery ingestion dispatcher.
+    Routes to the configured provider:
+      - 'earth_search': AWS Earth Search STAC + Open Data Sentinel-2 L2A COGs (public, zero credentials).
+      - 'sentinel_hub': Copernicus Sentinel-2 L2A via Sentinel Hub Process API (OAuth credentials required).
+    """
+    if provider is None:
+        provider = state.get("imagery_provider") or config.get_imagery_provider()
+
+    if provider == "earth_search":
+        from utils.earth_search import fetch_imagery_earth_search
+        return fetch_imagery_earth_search(state)
+    elif provider == "sentinel_hub":
+        return _fetch_imagery_sentinel_hub(state)
+    else:
+        raise ValueError(
+            f"Unknown imagery provider: '{provider}'. Supported providers are 'sentinel_hub' and 'earth_search'."
+        )
 
 
 def _safe_normalized_difference(band_a: np.ndarray, band_b: np.ndarray) -> np.ndarray:
@@ -905,14 +929,20 @@ def geo_agent(state: PipelineState) -> PipelineState:
     attempts = state.get("query_attempts", 0) + 1
     geo_fallback_note = None
 
-    is_mock = config.is_sentinel_hub_mock() if hasattr(config, "is_sentinel_hub_mock") else getattr(config, "SENTINEL_HUB_MOCK", True)
+    provider = state.get("imagery_provider") or config.get_imagery_provider()
+    if provider == "earth_search" and not state.get("force_mock", False):
+        is_mock = False
+    else:
+        is_mock = config.is_sentinel_hub_mock() if hasattr(config, "is_sentinel_hub_mock") else getattr(config, "SENTINEL_HUB_MOCK", True)
+
     if is_mock:
         raster, cloud_cover, scene_meta = _mock_fetch_imagery(state)
         execution_mode = "mock"
         is_synthetic = True
     else:
+        provider_title = "Sentinel Hub" if provider == "sentinel_hub" else "satellite"
         try:
-            raster, cloud_cover, scene_meta = _real_fetch_imagery(state)
+            raster, cloud_cover, scene_meta = _real_fetch_imagery(state, provider=provider)
             execution_mode = "live"
             is_synthetic = False
         except Exception as e:
@@ -920,15 +950,15 @@ def geo_agent(state: PipelineState) -> PipelineState:
                 return {
                     **state,
                     "error": (
-                        f"Live Sentinel Hub imagery retrieval failed: {e}. "
-                        "Live Mode requires valid Sentinel Hub API credentials and qualifying satellite scenes."
+                        f"Live {provider_title} imagery retrieval failed: {e}. "
+                        f"Live Mode requires valid API credentials and qualifying satellite scenes."
                     ),
                 }
             raster, cloud_cover, scene_meta = _mock_fetch_imagery(state)
             execution_mode = "live_fallback_to_mock"
             is_synthetic = True
             geo_fallback_note = (
-                f"NOTICE: Live Sentinel Hub retrieval failed ({e}). Reverted to synthetic mock raster "
+                f"NOTICE: Live {provider_title} retrieval failed ({e}). Reverted to synthetic mock raster "
                 "for pipeline demonstration. Results are synthetic and must NOT be used as live satellite observations."
             )
 

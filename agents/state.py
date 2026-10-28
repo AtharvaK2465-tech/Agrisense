@@ -11,6 +11,8 @@ class PipelineState(TypedDict, total=False):
     polygon_geojson: dict
     date_start: date
     date_end: date
+    imagery_provider: Optional[str]  # 'earth_search' | 'sentinel_hub' | 'auto'
+    force_mock: Optional[bool]
 
     # --- Geo Agent output ---
     raster: Optional[Any]          # clipped multi-band array (mock or real)

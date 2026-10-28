@@ -37,6 +37,33 @@ def is_sentinel_hub_mock() -> bool:
     return getattr(mod, "SENTINEL_HUB_MOCK", SENTINEL_HUB_MOCK)
 
 
+# --- Satellite Imagery Provider ------------------------------------------
+# Supports "auto", "sentinel_hub", or "earth_search".
+# "auto" (default): Uses Sentinel Hub if credentials are configured;
+#                   otherwise uses AWS Earth Search (public STAC + COGs).
+IMAGERY_PROVIDER = os.getenv("IMAGERY_PROVIDER", "sentinel_hub").lower()
+
+
+def get_imagery_provider() -> str:
+    """Returns the effective imagery provider: 'sentinel_hub' or 'earth_search'."""
+    mod = sys.modules.get("utils.config")
+    provider = (getattr(mod, "IMAGERY_PROVIDER", IMAGERY_PROVIDER) or os.getenv("IMAGERY_PROVIDER", "sentinel_hub")).lower()
+    if provider in ("earth_search", "element84", "aws_earth_search", "aws"):
+        return "earth_search"
+    elif provider in ("auto",):
+        cid, sec = get_sentinel_hub_credentials()
+        if cid and sec:
+            return "sentinel_hub"
+        return "earth_search"
+    return "sentinel_hub"
+
+
+def set_imagery_provider(provider: str) -> None:
+    global IMAGERY_PROVIDER
+    IMAGERY_PROVIDER = provider.lower()
+    os.environ["IMAGERY_PROVIDER"] = provider.lower()
+
+
 def set_sentinel_hub_credentials(client_id: str, client_secret: str) -> None:
     global SENTINEL_HUB_CLIENT_ID, SENTINEL_HUB_CLIENT_SECRET, SENTINEL_HUB_MOCK
     SENTINEL_HUB_CLIENT_ID = client_id
@@ -135,11 +162,15 @@ AGRICULTURAL_MIN_VEG_FRACTION = 0.10
 
 def get_mode_summary() -> dict:
     """Returns the current data source and execution mode configuration."""
+    provider = get_imagery_provider()
     live_sh = bool(SENTINEL_HUB_CLIENT_ID and SENTINEL_HUB_CLIENT_SECRET)
+    live_satellite = live_sh if provider == "sentinel_hub" else True
     live_gemini = not is_gemini_mock()
     return {
+        "imagery_provider": provider,
         "sentinel_hub_live": live_sh,
         "sentinel_hub_mode": "live" if live_sh else "mock",
+        "satellite_mode": "live" if live_satellite else "mock",
         "gemini_live": live_gemini,
         "gemini_mode": "live" if live_gemini else "mock",
         "restrict_to_maharashtra": RESTRICT_TO_MAHARASHTRA,

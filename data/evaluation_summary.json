@@ -72,7 +72,7 @@
           "imagery_type": "synthetic",
           "external_apis_contacted": {
             "open_meteo": true,
-            "gemini": false,
+            "gemini": true,
             "sentinel_hub": false
           },
           "processing_type": "deterministic_synthetic_fixture",
@@ -85,7 +85,7 @@
           "crop_heuristic_score": 0.95,
           "crop_similarity_margin": 0.0,
           "scene_id": "SYNTH-S2L2A-9EB6FC3F",
-          "report_source": "gemini-fallback-template",
+          "report_source": "gemini-live",
           "scientific_validation": "passed",
           "pdf_generated": true,
           "vegetation_fraction": 0.0,
@@ -99,7 +99,7 @@
           "imagery_type": "synthetic",
           "external_apis_contacted": {
             "open_meteo": true,
-            "gemini": false,
+            "gemini": true,
             "sentinel_hub": false
           },
           "processing_type": "deterministic_synthetic_fixture",
@@ -112,7 +112,7 @@
           "crop_heuristic_score": 0.271,
           "crop_similarity_margin": 0.005,
           "scene_id": "SYNTH-S2L2A-E30B760F",
-          "report_source": "gemini-fallback-template",
+          "report_source": "gemini-live",
           "scientific_validation": "passed",
           "pdf_generated": true,
           "vegetation_fraction": 0.754,
@@ -126,7 +126,7 @@
           "imagery_type": "synthetic",
           "external_apis_contacted": {
             "open_meteo": true,
-            "gemini": false,
+            "gemini": true,
             "sentinel_hub": false
           },
           "processing_type": "deterministic_synthetic_fixture",
@@ -139,7 +139,7 @@
           "crop_heuristic_score": 0.339,
           "crop_similarity_margin": 0.058,
           "scene_id": "SYNTH-S2L2A-B15E14B1",
-          "report_source": "gemini-fallback-template",
+          "report_source": "gemini-live",
           "scientific_validation": "passed",
           "pdf_generated": true,
           "vegetation_fraction": 0.75,
@@ -153,7 +153,7 @@
           "imagery_type": "synthetic",
           "external_apis_contacted": {
             "open_meteo": true,
-            "gemini": false,
+            "gemini": true,
             "sentinel_hub": false
           },
           "processing_type": "deterministic_synthetic_fixture",
@@ -166,7 +166,7 @@
           "crop_heuristic_score": 0.333,
           "crop_similarity_margin": 0.164,
           "scene_id": "SYNTH-S2L2A-A158F813",
-          "report_source": "gemini-fallback-template",
+          "report_source": "gemini-live",
           "scientific_validation": "passed",
           "pdf_generated": true,
           "vegetation_fraction": 0.751,
@@ -180,7 +180,7 @@
           "imagery_type": "synthetic",
           "external_apis_contacted": {
             "open_meteo": true,
-            "gemini": false,
+            "gemini": true,
             "sentinel_hub": false
           },
           "processing_type": "deterministic_synthetic_fixture",
@@ -193,7 +193,7 @@
           "crop_heuristic_score": 0.255,
           "crop_similarity_margin": 0.085,
           "scene_id": "SYNTH-S2L2A-F2644845",
-          "report_source": "gemini-fallback-template",
+          "report_source": "gemini-live",
           "scientific_validation": "passed",
           "pdf_generated": true,
           "vegetation_fraction": 0.753,
@@ -207,7 +207,7 @@
           "imagery_type": "synthetic",
           "external_apis_contacted": {
             "open_meteo": true,
-            "gemini": false,
+            "gemini": true,
             "sentinel_hub": false
           },
           "processing_type": "deterministic_synthetic_fixture",
@@ -220,7 +220,7 @@
           "crop_heuristic_score": 0.364,
           "crop_similarity_margin": 0.13,
           "scene_id": "SYNTH-S2L2A-52F46F41",
-          "report_source": "gemini-fallback-template",
+          "report_source": "gemini-live",
           "scientific_validation": "passed",
           "pdf_generated": true,
           "vegetation_fraction": 0.754,

@@ -1,13 +1,21 @@
 """
 Dedicated Live Sentinel-2 Integration Verification Tool
 -------------------------------------------------------
-Executes a reproducible live Sentinel Hub API validation run against
+Executes a reproducible live satellite validation run against
 the European Space Agency / Copernicus Sentinel-2 L2A satellite archive.
 
+Supported Providers:
+1. 'earth_search' (Default when credentials missing):
+   AWS Open Data Sentinel-2 L2A via Element 84 Earth Search STAC API.
+   Requires NO API keys or OAuth setup. Accesses genuine Cloud-Optimized GeoTIFFs (COGs).
+2. 'sentinel_hub':
+   Copernicus Sentinel-2 L2A via Sentinel Hub Process API.
+   Requires SENTINEL_HUB_CLIENT_ID and SENTINEL_HUB_CLIENT_SECRET.
+
 Verification Steps:
-1. Validates that Sentinel Hub credentials exist in environment/.env without printing secrets.
-2. Submits a Catalog API search for the least-cloudy Sentinel-2 scene over the target AOI.
-3. Retrieves 6-band multispectral data (RGB, NIR, SWIR, RedEdge) via Sentinel Hub Process API.
+1. Validates provider preflight (credentials or open-access connectivity).
+2. Submits a STAC / Catalog search for the least-cloudy Sentinel-2 scene over the target AOI.
+3. Retrieves 8-band multispectral data (B04, B03, B02, B08, B11, B05, SCL, dataMask).
 4. Verifies dimensions, spatial resolution, nodata masking, and band validity.
 5. Computes analytical spectral indices (NDVI, NDMI, NDRE) and surface classification fractions.
 6. Records complete provenance and metadata.
@@ -17,14 +25,15 @@ import argparse
 import os
 import sys
 from datetime import date, timedelta
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+import numpy as np
 
 # Ensure project root is on sys.path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from utils.config import get_sentinel_hub_credentials
+from utils.config import get_sentinel_hub_credentials, get_imagery_provider
 from utils.geo import point_radius_to_geojson, validate_polygon, get_aoi_metadata
 from agents.geo_agent import _real_fetch_imagery, _compute_indices
 
@@ -39,31 +48,51 @@ def validate_live_sentinel_integration(
     lat: float = DEFAULT_LAT,
     lon: float = DEFAULT_LON,
     radius_km: float = DEFAULT_RADIUS_KM,
-    start_date: date = None,
-    end_date: date = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    provider: str = "auto",
 ) -> Dict[str, Any]:
     print("=================================================================")
     print("[AGRISENSE] Live Sentinel-2 Satellite Integration Verification")
     print("=================================================================\n")
 
-    # Step 1: Credential presence check (Never print credentials)
+    # Step 1: Provider selection & Preflight
+    effective_provider = provider.lower()
     client_id, client_secret = get_sentinel_hub_credentials()
-    if not client_id or not client_secret:
-        print("[-] FAILED: Sentinel Hub API credentials not found.")
-        print("    Configuration required in .env or environment:")
-        print("      SENTINEL_HUB_CLIENT_ID=<your-oauth-client-id>")
-        print("      SENTINEL_HUB_CLIENT_SECRET=<your-oauth-client-secret>")
-        print("    Create free credentials at: https://dashboard.sentinel-hub.com/")
-        print("    Live verification cannot proceed without credentials.")
-        return {"status": "FAILED", "reason": "Missing credentials", "exit_code": 1}
+    has_sh_credentials = bool(client_id and client_secret)
 
-    print("[+] Credentials detected in environment (Client ID: present, Secret: present).")
+    if effective_provider == "auto":
+        if has_sh_credentials:
+            effective_provider = "sentinel_hub"
+            print("[+] Auto-selected provider: Sentinel Hub (OAuth credentials detected).")
+        else:
+            effective_provider = "earth_search"
+            print("[*] Sentinel Hub credentials not detected in .env.")
+            print("[+] Auto-selected provider: AWS Earth Search / Open Data (no credentials required).")
+    elif effective_provider in ("sentinel_hub", "sentinelhub", "sh"):
+        effective_provider = "sentinel_hub"
+        if not has_sh_credentials:
+            print("[-] FAILED: Sentinel Hub API credentials not found.")
+            print("    Configuration required in .env or environment:")
+            print("      SENTINEL_HUB_CLIENT_ID=<your-oauth-client-id>")
+            print("      SENTINEL_HUB_CLIENT_SECRET=<your-oauth-client-secret>")
+            print("    Create free credentials at: https://dashboard.sentinel-hub.com/")
+            print("    Alternatively, run with '--provider earth_search' to use open public data.")
+            return {"status": "FAILED", "reason": "Missing credentials", "exit_code": 1}
+        print("[+] Credentials detected in environment (Client ID: present, Secret: present).")
+    elif effective_provider in ("earth_search", "element84", "aws"):
+        effective_provider = "earth_search"
+        print("[+] Selected provider: AWS Earth Search / Open Data (Sentinel-2 L2A COGs).")
+    else:
+        print(f"[-] FAILED: Unknown imagery provider '{provider}'. Supported: 'auto', 'earth_search', 'sentinel_hub'.")
+        return {"status": "FAILED", "reason": f"Unknown provider: {provider}", "exit_code": 1}
 
     # Step 2: AOI and Date Window Configuration
     if end_date is None:
-        end_date = date.today() - timedelta(days=5)
+        # Default to high-sun observation window in 2024
+        end_date = date(2024, 4, 30)
     if start_date is None:
-        start_date = end_date - timedelta(days=30)
+        start_date = date(2024, 1, 1)
 
     print(f"[+] Target AOI: Center ({lat:.4f}N, {lon:.4f}E), Radius {radius_km:.1f} km")
     print(f"[+] Date Search Window: {start_date.isoformat()} to {end_date.isoformat()} ({ (end_date - start_date).days } days)")
@@ -81,12 +110,13 @@ def validate_live_sentinel_integration(
         "polygon_geojson": poly,
         "date_start": start_date,
         "date_end": end_date,
+        "imagery_provider": effective_provider,
     }
 
     # Step 3: Live Copernicus Sentinel-2 Retrieval
-    print("\n--> Contacting Sentinel Hub Catalog and Process APIs...")
+    print(f"\n--> Contacting {effective_provider} satellite archive...")
     try:
-        raster, cloud_cover, scene_meta = _real_fetch_imagery(state)
+        raster, cloud_cover, scene_meta = _real_fetch_imagery(state, provider=effective_provider)
     except Exception as exc:
         print(f"\n[-] FAILED: Live satellite retrieval encountered an error:")
         print(f"    {exc}")
@@ -176,6 +206,13 @@ def main():
     parser.add_argument("--radius-km", type=float, default=DEFAULT_RADIUS_KM, help="Radius around point in km")
     parser.add_argument("--start-date", type=str, default=None, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end-date", type=str, default=None, help="End date (YYYY-MM-DD)")
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default="auto",
+        choices=["auto", "earth_search", "sentinel_hub"],
+        help="Satellite data provider (default: auto)",
+    )
     args = parser.parse_args()
 
     s_date = date.fromisoformat(args.start_date) if args.start_date else None
@@ -187,6 +224,7 @@ def main():
         radius_km=args.radius_km,
         start_date=s_date,
         end_date=e_date,
+        provider=args.provider,
     )
     sys.exit(res["exit_code"])
 
