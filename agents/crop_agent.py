@@ -79,14 +79,22 @@ def crop_agent(state: PipelineState) -> PipelineState:
 
     polygon = state["polygon_geojson"]
     ndvi = state.get("ndvi")
+    crop_ndvi = state.get("crop_ndvi") if state.get("crop_ndvi") is not None else ndvi
 
-    # Safeguard: check for usable finite pixels
+    # Usable finite pixels for general index vs crop canopy
     usable_ndvi = ndvi[np.isfinite(ndvi)] if ndvi is not None else np.array([], dtype=float)
-    usable_count = len(usable_ndvi)
+    finite_crop_ndvi = crop_ndvi[np.isfinite(crop_ndvi)] if crop_ndvi is not None else np.array([], dtype=float)
+    usable_count = len(finite_crop_ndvi)
     valid_pixels_pct = state.get("valid_pixels_pct", 100.0)
     ndvi_status = state.get("indices_quality", {}).get("ndvi", {}).get("status")
+    qm = state.get("quality_metrics", {})
+    water_pct = qm.get("water_fraction_pct", 0.0)
 
-    if usable_count == 0 or valid_pixels_pct < 1.0 or ndvi_status == "insufficient_usable_pixels":
+    # Detect surface water body from SCL metrics or negative general NDVI
+    spectral_water_frac = float(np.mean((usable_ndvi < 0.0) & (usable_ndvi > -1.0))) if len(usable_ndvi) > 0 else 0.0
+    is_water_body = (water_pct > 50.0) or (spectral_water_frac > 0.50)
+
+    if ((usable_count == 0 or valid_pixels_pct < 1.0) and not is_water_body) or ndvi_status == "insufficient_usable_pixels":
         district = locate_district(polygon)
         season = season_for_date(state["date_end"])
         return {
@@ -107,7 +115,7 @@ def crop_agent(state: PipelineState) -> PipelineState:
             "crop_agent_notes": "Scene marked unavailable due to heavy cloud obscuration, shadow, or missing data.",
         }
 
-    current_mean_ndvi = float(np.mean(usable_ndvi))
+    current_mean_ndvi = float(np.mean(finite_crop_ndvi)) if len(finite_crop_ndvi) > 0 else float(np.mean(usable_ndvi)) if len(usable_ndvi) > 0 else 0.0
     district = locate_district(polygon)
     season = season_for_date(state["date_end"])
 
@@ -118,19 +126,17 @@ def crop_agent(state: PipelineState) -> PipelineState:
     ground_info = detect_ground_context(polygon, current_mean_ndvi)
     is_explicit_non_agri = ground_info.get("is_non_agri", False)
 
-    # Check for surface water bodies via spectral indices:
-    # Water displays negative NDVI and very low NIR reflectance.
-    water_fraction = float(np.mean((usable_ndvi < 0.0) & (usable_ndvi > -1.0)))
-    if water_fraction > 0.60:
+    # Check for surface water bodies via SCL and spectral indices:
+    if is_water_body:
         ground_info = {
             "is_non_agri": True,
             "category": "Water Body",
-            "reason": f"Predominantly negative NDVI ({water_fraction:.0%} of usable pixels < 0.0) indicating surface water body.",
+            "reason": f"Predominantly surface water body ({max(water_pct, spectral_water_frac*100):.0f}% water) with zero crop canopy.",
         }
         is_explicit_non_agri = True
 
-    # Spatial vegetation fraction in scene (pixels displaying active photosynthetic canopy)
-    veg_fraction = float(np.mean(usable_ndvi > 0.22))
+    # Spatial vegetation fraction in crop-usable area
+    veg_fraction = float(np.mean(finite_crop_ndvi > 0.22)) if len(finite_crop_ndvi) > 0 else 0.0
 
     # Determine eligibility:
     # CRITICAL PRINCIPLE: Low NDVI alone (from bare soil, recent harvest, early emergence,

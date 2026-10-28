@@ -14,7 +14,8 @@ class PipelineState(TypedDict, total=False):
 
     # --- Geo Agent output ---
     raster: Optional[Any]          # clipped multi-band array (mock or real)
-    ndvi: Optional[Any]
+    ndvi: Optional[Any]            # general spectral NDVI (masked by index_usable_mask)
+    crop_ndvi: Optional[Any]       # agricultural canopy NDVI (masked by crop_usable_mask)
     ndmi: Optional[Any]
     ndre: Optional[Any]
     indices_quality: Optional[dict]  # status and availability metadata for ndvi, ndmi, ndre

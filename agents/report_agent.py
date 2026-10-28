@@ -75,6 +75,12 @@ def _mock_report(state: PipelineState, advisory_matches: List[Dict[str, Any]], i
     nodata_info = ""
     if qm.get("nodata_fraction_pct") is not None:
         nodata_info = f" | Nodata/Off-Swath: {qm.get('nodata_fraction_pct', 0.0):.1f}%"
+    water_info = ""
+    if qm.get("water_fraction_pct", 0.0) > 0:
+        water_info = f" | Water Excluded: {qm.get('water_fraction_pct', 0.0):.1f}%"
+    scl7_info = ""
+    if qm.get("scl_unclassified_fraction_pct", 0.0) > 0:
+        scl7_info = f" | SCL Unclassified: {qm.get('scl_unclassified_fraction_pct', 0.0):.1f}%"
 
     # Baseline text
     baseline_status = state.get("baseline_status", "unavailable")
@@ -154,7 +160,7 @@ def _mock_report(state: PipelineState, advisory_matches: List[Dict[str, Any]], i
 ### Spectral Indices & Surface Breakdown
 {_format_indices_summary(state)}
 - **Surface Fractions:** Active Vegetation: {veg_pct:.1f}% | Bare Ground/Fallow: {bare_pct:.1f}% | Water: {water_pct:.1f}%
-- **Valid Usable Pixel Coverage:** {state.get('valid_pixels_pct', 100.0):.1f}% (Denominator: AOI pixels){cloud_shadow_info}{nodata_info}
+- **Crop-Suitable Pixel Coverage:** {qm.get('crop_usable_pixel_pct', state.get('valid_pixels_pct', 100.0)):.1f}% (Denominator: AOI pixels){cloud_shadow_info}{nodata_info}{water_info}{scl7_info}
 
 ### Temporal Baseline Context
 {baseline_text}

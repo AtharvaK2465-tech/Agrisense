@@ -45,31 +45,74 @@ def _compute_aoi_mask(
     bbox: Optional[Tuple[float, float, float, float]] = None,
 ) -> np.ndarray:
     """Computes a boolean mask of shape (H, W) indicating whether each pixel center
-    falls inside the requested AOI polygon. Pixels outside are off-AOI."""
+    falls inside the requested AOI polygon.
+    
+    Coordinate Reference System & Transform Alignment:
+      - GeoJSON coordinates are WGS84 (EPSG:4326), longitude (X) and latitude (Y).
+      - Raster grid transform maps rows (0 to H-1) from North (maxy) to South (miny)
+        and cols (0 to W-1) from West (minx) to East (maxx).
+      - Pixel center offsets are exact half-pixels: (c + 0.5) * dx, (r + 0.5) * dy.
+      - Boundary handling uses `shapely.intersects_xy` to deliberately include
+        pixel centers that lie on polygon boundaries.
+      - Small / narrow polygons: if a valid non-empty polygon has positive area but
+        is smaller than pixel spacing dx * dy, the pixel cell containing its centroid is
+        selected to preserve the spatial anchor rather than fabricating 100% coverage.
+      - Empty or invalid geometries raise explicit ValueError rather than fabricating coverage.
+    """
     h, w = shape_hw
+    if h <= 0 or w <= 0:
+        raise ValueError(f"Raster dimensions must be positive integers, got shape {(h, w)}.")
     if polygon_geojson is None:
         return np.ones((h, w), dtype=bool)
+
+    # Geometry validation: empty or unparseable geometries must error explicitly
     try:
         from shapely.geometry import shape
         import shapely
         geom = shape(polygon_geojson)
-        if bbox is None:
-            minx, miny, maxx, maxy = geom.bounds
+    except Exception as exc:
+        raise ValueError(f"Invalid AOI GeoJSON geometry: {exc}") from exc
+
+    if geom.is_empty:
+        raise ValueError("Invalid AOI geometry: geometry is empty.")
+
+    if not geom.is_valid:
+        from shapely.validation import make_valid
+        geom = make_valid(geom)
+        if geom.is_empty:
+            raise ValueError("Invalid AOI geometry: self-intersection or boundary defect could not be resolved.")
+
+    if bbox is None:
+        minx, miny, maxx, maxy = geom.bounds
+    else:
+        minx, miny, maxx, maxy = bbox
+
+    if not (np.isfinite(minx) and np.isfinite(miny) and np.isfinite(maxx) and np.isfinite(maxy)):
+        raise ValueError(f"AOI bounding box contains non-finite bounds: {(minx, miny, maxx, maxy)}.")
+    if maxx <= minx or maxy <= miny:
+        raise ValueError(f"Degenerate AOI bounding box: minx={minx}, maxx={maxx}, miny={miny}, maxy={maxy}.")
+
+    dx = (maxx - minx) / float(w)
+    dy = (maxy - miny) / float(h)
+    xs = np.linspace(minx + dx / 2.0, maxx - dx / 2.0, w)
+    ys = np.linspace(maxy - dy / 2.0, miny + dy / 2.0, h)
+    xx, yy = np.meshgrid(xs, ys)
+
+    # shapely.intersects_xy tests whether pixel centres fall inside the polygon or on its boundary
+    mask = shapely.intersects_xy(geom, xx, yy)
+
+    # Small or narrow polygons: if no pixel centers hit the interior/boundary, anchor to centroid cell
+    if not np.any(mask):
+        c = geom.centroid
+        cx, cy = c.x, c.y
+        if minx <= cx <= maxx and miny <= cy <= maxy:
+            col_idx = int(np.clip((cx - minx) / dx, 0, w - 1))
+            row_idx = int(np.clip((maxy - cy) / dy, 0, h - 1))
+            mask[row_idx, col_idx] = True
         else:
-            minx, miny, maxx, maxy = bbox
-        if maxx <= minx or maxy <= miny or h == 0 or w == 0:
-            return np.ones((h, w), dtype=bool)
-        dx = (maxx - minx) / w
-        dy = (maxy - miny) / h
-        xs = np.linspace(minx + dx / 2.0, maxx - dx / 2.0, w)
-        ys = np.linspace(maxy - dy / 2.0, miny + dy / 2.0, h)
-        xx, yy = np.meshgrid(xs, ys)
-        mask = shapely.contains_xy(geom, xx, yy)
-        if not np.any(mask):
-            return np.ones((h, w), dtype=bool)
-        return mask.astype(bool)
-    except Exception:
-        return np.ones((h, w), dtype=bool)
+            return np.zeros((h, w), dtype=bool)
+
+    return mask.astype(bool)
 
 
 def evaluate_pixel_quality(
@@ -80,15 +123,24 @@ def evaluate_pixel_quality(
     bbox: Optional[Tuple[float, float, float, float]] = None,
 ) -> Dict[str, Any]:
     """
-    Evaluates pixel-level data quality, distinguishing:
-    1. No-data or off-swath pixels (dataMask == 0, SCL == 0, or all bands NaN).
-    2. Pixels outside the requested AOI (off-polygon within grid).
-    3. Cloud-contaminated pixels (SCL 8, 9, 10).
-    4. Cloud-shadow-contaminated pixels (SCL 2, 3).
-    5. Pixels with invalid or non-finite band values.
-    6. Pixels with valid measurements but potentially unreliable vegetation-index interpretation (SCL 1, 6, 11).
+    Evaluates pixel-level data quality, strictly distinguishing:
+    A. Pixels valid for general spectral-index calculation (index_usable_mask):
+       - Inside AOI polygon, valid satellite swath (dataMask == 1), finite reflectances,
+         and free of clouds (8, 9, 10), shadows (2, 3), sensor saturation/defects (1), and nodata (0).
+       - Includes SCL 4 (Vegetation), SCL 5 (Non-vegetated), SCL 6 (Water), and SCL 7 (Unclassified).
+    B. Pixels suitable for agricultural crop-health interpretation (crop_usable_mask):
+       - Inside AOI, in index_usable_mask, AND:
+         * Excludes SCL 6 (Water bodies) — water is non-agricultural; negative NDVI (-0.5 to -0.1)
+           would falsely inflate agricultural stress fractions or false disease diagnoses.
+         * Excludes SCL 11 (Snow/Ice).
+         * Excludes SCL 7 (Unclassified) — Sen2Cor spectral ambiguity; excluded from confident
+           crop canopy diagnosis to maintain diagnostic integrity and reported separately.
+         * Includes SCL 4 (Clear Vegetation) and SCL 5 (Bare agricultural soil / fallow).
+    C. Pixels excluded from both:
+       - SCL 0, 1, 2, 3, 8, 9, 10, dataMask == 0, non-finite bands, or outside AOI.
 
-    Returns explicit pixel masks and separate coverage metrics with clearly stated denominators.
+    Ensures all intra-AOI fraction denominators are unambiguous (Total AOI pixels) and
+    strictly partitions pixels to prevent double-counting.
     """
     h, w = raster.shape[0], raster.shape[1]
     n_grid = h * w
@@ -98,6 +150,31 @@ def evaluate_pixel_quality(
         scl = raster[..., 6]
     if data_mask is None and raster.shape[-1] >= 8:
         data_mask = raster[..., 7]
+
+    # SCL Categorical Integrity Check:
+    # SCL is a discrete classification layer. It must NOT be bilinearly or cubically interpolated.
+    if scl is not None:
+        scl_arr = np.asarray(scl)
+        scl_finite = scl_arr[np.isfinite(scl_arr)]
+        if len(scl_finite) > 0:
+            scl_rounded = np.rint(scl_finite)
+            # Detect interpolated (non-discrete) SCL values
+            if not np.all(np.isclose(scl_finite, scl_rounded, atol=1e-3)):
+                bad_vals = scl_finite[~np.isclose(scl_finite, scl_rounded, atol=1e-3)]
+                raise ValueError(
+                    f"Categorical violation in SCL: detected non-discrete interpolated class values "
+                    f"(sample: {bad_vals[:5].tolist()}). SCL resampling must be NEAREST-neighbour."
+                )
+            # Check valid discrete range [0, 11]
+            scl_ints = scl_rounded.astype(np.int32)
+            if np.any((scl_ints < 0) | (scl_ints > 11)):
+                bad_ints = scl_ints[(scl_ints < 0) | (scl_ints > 11)]
+                raise ValueError(
+                    f"Invalid SCL class values detected outside official Sentinel-2 range [0, 11]: "
+                    f"{np.unique(bad_ints)[:5].tolist()}."
+                )
+            # Round and cast to int32 for exact discrete masking
+            scl = np.where(np.isfinite(scl_arr), np.rint(scl_arr).astype(np.int32), SCL_NO_DATA)
 
     # 2. AOI mask (inside vs outside requested AOI)
     aoi_mask = _compute_aoi_mask(polygon_geojson, (h, w), bbox=bbox)
@@ -153,28 +230,60 @@ def evaluate_pixel_quality(
         shadow_mask = np.zeros((h, w), dtype=bool)
         n_shadow = None
 
-    # 6. Unreliable for vegetation indices (Saturated/defective, Water, Snow)
+    # 6. Detailed SCL class breakdown for non-cloud/non-shadow surfaces
     if scl is not None:
         defective_mask = source_data_valid & np.isin(scl, SCL_DEFECTIVE_CLASSES)
         water_mask = source_data_valid & (scl == SCL_WATER)
         snow_mask = source_data_valid & (scl == SCL_SNOW_ICE)
-        unreliable_mask = defective_mask | water_mask | snow_mask
-        n_unreliable = int(np.sum(unreliable_mask))
+        scl7_mask = source_data_valid & (scl == SCL_UNCLASSIFIED)
+        vegetation_mask = source_data_valid & (scl == SCL_VEGETATION)
+        not_vegetated_mask = source_data_valid & (scl == SCL_NOT_VEGETATED)
+
+        n_defective = int(np.sum(defective_mask))
+        n_water = int(np.sum(water_mask))
+        n_snow = int(np.sum(snow_mask))
+        n_scl7 = int(np.sum(scl7_mask))
+        n_vegetation = int(np.sum(vegetation_mask))
+        n_not_vegetated = int(np.sum(not_vegetated_mask))
     else:
         defective_mask = np.zeros((h, w), dtype=bool)
         water_mask = np.zeros((h, w), dtype=bool)
         snow_mask = np.zeros((h, w), dtype=bool)
-        unreliable_mask = np.zeros((h, w), dtype=bool)
-        n_unreliable = None
+        scl7_mask = np.zeros((h, w), dtype=bool)
+        vegetation_mask = np.zeros((h, w), dtype=bool)
+        not_vegetated_mask = np.zeros((h, w), dtype=bool)
 
-    # Usable pixels for vegetation index calculation:
-    # Must be inside AOI, valid swath, finite reflectance, and free of cloud/shadow/defective pixels.
+        n_defective = None
+        n_water = None
+        n_snow = None
+        n_scl7 = None
+        n_vegetation = None
+        n_not_vegetated = None
+
+    # Policy Distinction:
+    # A. Index-Usable Mask: Valid for general spectral indices (NDVI, NDMI, NDRE).
+    #    Excludes nodata, invalid bands, clouds, shadows, defective detector pixels, and snow/ice.
+    #    Water and unclassified pixels remain present here because they possess valid physical reflectance.
     if scl is not None:
-        excluded_for_indices = nodata_mask | invalid_bands_mask | cloud_mask | shadow_mask | defective_mask
-        usable_mask = aoi_mask & (~excluded_for_indices)
+        excluded_for_indices = nodata_mask | invalid_bands_mask | cloud_mask | shadow_mask | defective_mask | snow_mask
+        index_usable_mask = aoi_mask & (~excluded_for_indices)
     else:
-        usable_mask = aoi_mask & (~nodata_mask) & (~invalid_bands_mask)
-    n_usable = int(np.sum(usable_mask))
+        index_usable_mask = aoi_mask & (~nodata_mask) & (~invalid_bands_mask)
+    n_index_usable = int(np.sum(index_usable_mask))
+
+    # B. Crop-Usable Mask: Strictly suitable for agricultural crop-health interpretation.
+    #    Excludes Water (SCL 6) and SCL 7 (Unclassified).
+    #    Water is non-agricultural surface; SCL 7 represents ambiguous classification in Sen2Cor.
+    if scl is not None:
+        excluded_for_crop = excluded_for_indices | water_mask | scl7_mask
+        crop_usable_mask = aoi_mask & (~excluded_for_crop)
+    else:
+        crop_usable_mask = index_usable_mask
+    n_crop_usable = int(np.sum(crop_usable_mask))
+
+    # Usable mask defaults to crop_usable_mask for agricultural diagnosis
+    usable_mask = crop_usable_mask
+    n_usable = n_crop_usable
 
     # Fractions and explicit denominators
     aoi_coverage_pct = round((n_aoi / n_grid * 100.0), 2) if n_grid > 0 else 0.0
@@ -185,17 +294,27 @@ def evaluate_pixel_quality(
         cloud_pct = round((n_cloud / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
         shadow_pct = round((n_shadow / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
         cloud_shadow_pct = round(((n_cloud + n_shadow) / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
+        defective_pct = round((n_defective / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
+        water_pct = round((n_water / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
+        scl7_pct = round((n_scl7 / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
+        snow_pct = round((n_snow / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
         cloud_reason = "Sentinel-2 L2A SCL classes 8 (Medium Cloud), 9 (High Cloud), 10 (Thin Cirrus)"
         shadow_reason = "Sentinel-2 L2A SCL classes 2 (Cast Shadow), 3 (Cloud Shadow)"
     else:
         cloud_pct = None
         shadow_pct = None
         cloud_shadow_pct = None
+        defective_pct = None
+        water_pct = None
+        scl7_pct = None
+        snow_pct = None
         cloud_reason = "Scene Classification Layer (SCL) not present; pixel-level cloud masking unavailable."
         shadow_reason = "Scene Classification Layer (SCL) not present; shadow masking unavailable."
 
-    usable_pct = round((n_usable / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
-    usable_of_acquired_pct = round((n_usable / n_data_valid * 100.0), 2) if n_data_valid > 0 else 0.0
+    index_usable_pct = round((n_index_usable / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
+    crop_usable_pct = round((n_crop_usable / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
+    usable_pct = crop_usable_pct
+    usable_of_acquired_pct = round((n_crop_usable / n_data_valid * 100.0), 2) if n_data_valid > 0 else 0.0
 
     return {
         "masks": {
@@ -204,8 +323,13 @@ def evaluate_pixel_quality(
             "cloud_mask": cloud_mask,
             "shadow_mask": shadow_mask,
             "invalid_bands_mask": invalid_bands_mask,
-            "unreliable_mask": unreliable_mask,
-            "usable_mask": usable_mask,
+            "defective_mask": defective_mask,
+            "water_mask": water_mask,
+            "scl7_mask": scl7_mask,
+            "snow_mask": snow_mask,
+            "index_usable_mask": index_usable_mask,
+            "crop_usable_mask": crop_usable_mask,
+            "usable_mask": crop_usable_mask,
         },
         "counts": {
             "grid_pixels": n_grid,
@@ -215,7 +339,13 @@ def evaluate_pixel_quality(
             "invalid_band_pixels": n_invalid_bands,
             "cloud_pixels": n_cloud,
             "shadow_pixels": n_shadow,
-            "usable_pixels": n_usable,
+            "defective_pixels": n_defective,
+            "water_pixels": n_water,
+            "unclassified_scl_pixels": n_scl7,
+            "snow_pixels": n_snow,
+            "index_usable_pixels": n_index_usable,
+            "crop_usable_pixels": n_crop_usable,
+            "usable_pixels": n_crop_usable,
         },
         "metrics": {
             "aoi_pixel_coverage_pct": aoi_coverage_pct,
@@ -230,6 +360,18 @@ def evaluate_pixel_quality(
             "shadow_denominator": "Total AOI pixels" if shadow_pct is not None else "unavailable (SCL missing)",
             "cloud_shadow_fraction_pct": cloud_shadow_pct,
             "cloud_shadow_denominator": "Total AOI pixels" if cloud_shadow_pct is not None else "unavailable (SCL missing)",
+            "defective_fraction_pct": defective_pct,
+            "defective_denominator": "Total AOI pixels" if defective_pct is not None else "unavailable (SCL missing)",
+            "water_fraction_pct": water_pct,
+            "water_denominator": "Total AOI pixels" if water_pct is not None else "unavailable (SCL missing)",
+            "scl_unclassified_fraction_pct": scl7_pct,
+            "scl_unclassified_denominator": "Total AOI pixels" if scl7_pct is not None else "unavailable (SCL missing)",
+            "snow_fraction_pct": snow_pct,
+            "snow_denominator": "Total AOI pixels" if snow_pct is not None else "unavailable (SCL missing)",
+            "index_usable_pixel_pct": index_usable_pct,
+            "index_usable_denominator": "Total AOI pixels",
+            "crop_usable_pixel_pct": crop_usable_pct,
+            "crop_usable_denominator": "Total AOI pixels",
             "usable_pixel_pct": usable_pct,
             "usable_pixel_denominator": "Total AOI pixels",
             "usable_of_acquired_data_pct": usable_of_acquired_pct,
@@ -237,7 +379,11 @@ def evaluate_pixel_quality(
             "cloud_masking_status": cloud_status,
             "cloud_masking_reason": cloud_reason,
             "shadow_masking_reason": shadow_reason,
-            "masking_method": "ESA Sen2Cor SCL (classes 2,3,8,9,10) + dataMask + AOI Geometry" if scl is not None else "dataMask / band-validity only (SCL unavailable)",
+            "masking_method": "ESA Sen2Cor SCL + dataMask + AOI Geometry" if scl is not None else "dataMask / band-validity only (SCL unavailable)",
+            "scl_policy_notes": (
+                "SCL 6 (Water) excluded from crop-health interpretation and reported separately. "
+                "SCL 7 (Unclassified) excluded from confident crop diagnosis to prevent ambiguous classification error."
+            ),
         },
     }
 
@@ -306,7 +452,7 @@ def _mock_fetch_imagery(state: PipelineState) -> Tuple[np.ndarray, float, Dict[s
         "is_synthetic": True,
         "resolution_m": 10.0,
         "bands_requested": ["B04", "B03", "B02", "B08", "B11", "B05", "SCL", "dataMask"],
-        "resampling_note": "Synthetic 10m mock raster grid with simulated SCL and dataMask",
+        "resampling_note": "Categorical bands (SCL [native 20m], dataMask) resampled via NEAREST-neighbour interpolation. Continuous bands (B05, B11) resampled via BILINEAR interpolation to 10m grid.",
     }
     return raster, cloud_cover, scene_meta
 
@@ -315,7 +461,20 @@ _EVALSCRIPT_8BAND = """
 //VERSION=3
 function setup() {
   return {
-    input: ["B02", "B03", "B04", "B05", "B08", "B11", "SCL", "dataMask"],
+    input: [
+      {
+        bands: ["B02", "B03", "B04", "B08"],
+        resampling: "BILINEAR"
+      },
+      {
+        bands: ["B05", "B11"],
+        resampling: "BILINEAR"
+      },
+      {
+        bands: ["SCL", "dataMask"],
+        resampling: "NEAREST"
+      }
+    ],
     output: { bands: 8, sampleType: "FLOAT32" }
   };
 }
@@ -494,7 +653,7 @@ def _real_fetch_imagery(state: PipelineState) -> Tuple[np.ndarray, float, Dict[s
         "is_synthetic": False,
         "resolution_m": round(resolution, 1),
         "bands_requested": bands_requested,
-        "resampling_note": "Sentinel-2 20m bands (B05, B11, SCL) resampled to 10m resolution via Sentinel Hub server-side interpolation",
+        "resampling_note": "Categorical bands (SCL [native 20m], dataMask) resampled via NEAREST-neighbour interpolation. Continuous bands (B05, B11 [native 20m]) resampled via BILINEAR interpolation to 10m grid.",
         "valid_pixel_ratio": round(usable_fraction, 3),
         "quality_metrics": quality_eval["metrics"],
     }
@@ -566,19 +725,36 @@ def _compute_indices(
     n_aoi = quality_eval["counts"]["aoi_pixels"]
 
     # 1. NDVI: NIR and Red
+    index_usable_mask = quality_eval["masks"]["index_usable_mask"]
+    crop_usable_mask = quality_eval["masks"]["crop_usable_mask"]
+    n_index_usable = quality_eval["counts"]["index_usable_pixels"]
+    n_crop_usable = quality_eval["counts"]["crop_usable_pixels"]
+
     if "nir" in mapping and "red" in mapping and mapping["nir"] < num_bands and mapping["red"] < num_bands:
         red = raster[..., mapping["red"]].copy()
         nir = raster[..., mapping["nir"]].copy()
         ndvi = _safe_normalized_difference(nir, red)
-        # Mask out unusable pixels (clouds, shadows, nodata, non-finite)
-        ndvi[~usable_mask] = np.nan
+        # Mask out unusable pixels for general index: clouds, shadows, nodata, non-finite
+        ndvi[~index_usable_mask] = np.nan
 
-        if n_usable > 0:
+        # Agricultural crop NDVI: strictly masks out water (SCL 6), snow (SCL 11), and unclassified (SCL 7)
+        crop_ndvi = ndvi.copy()
+        crop_ndvi[~crop_usable_mask] = np.nan
+
+        if n_crop_usable > 0:
             indices_quality["ndvi"] = {
                 "status": "calculated",
                 "bands": "B08 (NIR 842nm), B04 (Red 665nm)",
                 "formula": "(NIR - Red) / (NIR + Red)",
                 "is_synthetic": is_synthetic,
+            }
+        elif n_index_usable > 0:
+            indices_quality["ndvi"] = {
+                "status": "calculated_non_crop",
+                "bands": "B08 (NIR 842nm), B04 (Red 665nm)",
+                "formula": "(NIR - Red) / (NIR + Red)",
+                "is_synthetic": is_synthetic,
+                "reason": "Valid reflectance available for general indices, but AOI contains zero crop-canopy pixels (predominantly water/unclassified).",
             }
         else:
             indices_quality["ndvi"] = {
@@ -588,6 +764,7 @@ def _compute_indices(
             }
     else:
         ndvi = None
+        crop_ndvi = None
         missing = []
         if "nir" not in mapping or mapping.get("nir", 999) >= num_bands:
             missing.append("NIR (B08)")
@@ -604,8 +781,8 @@ def _compute_indices(
         swir = raster[..., mapping["swir"]].copy()
         nir = raster[..., mapping["nir"]].copy()
         ndmi = _safe_normalized_difference(nir, swir)
-        ndmi[~usable_mask] = np.nan
-        if n_usable > 0:
+        ndmi[~index_usable_mask] = np.nan
+        if n_index_usable > 0:
             indices_quality["ndmi"] = {
                 "status": "calculated",
                 "bands": "B08 (NIR 842nm), B11 (SWIR 1610nm)",
@@ -631,8 +808,8 @@ def _compute_indices(
         rededge = raster[..., mapping["rededge"]].copy()
         nir = raster[..., mapping["nir"]].copy()
         ndre = _safe_normalized_difference(nir, rededge)
-        ndre[~usable_mask] = np.nan
-        if n_usable > 0:
+        ndre[~index_usable_mask] = np.nan
+        if n_index_usable > 0:
             indices_quality["ndre"] = {
                 "status": "calculated",
                 "bands": "B08 (NIR 842nm), B05 (RedEdge 705nm)",
@@ -660,12 +837,32 @@ def _compute_indices(
     }
 
     # Surface classification fractions across AOI pixels
-    if ndvi is not None and n_usable > 0:
-        usable_ndvi = ndvi[usable_mask]
+    aoi_mask = quality_eval["masks"]["aoi_mask"]
+    if scl is not None:
+        scl_aoi = scl[aoi_mask]
+        water_count = int(np.sum(scl_aoi == SCL_WATER))
+        # Clear vegetation and bare soil from crop-usable pixels
+        if crop_ndvi is not None and n_crop_usable > 0:
+            crop_vals = crop_ndvi[crop_usable_mask]
+            veg_count = int(np.sum(crop_vals >= 0.25))
+            bare_count = int(np.sum((crop_vals >= 0.0) & (crop_vals < 0.25)))
+        else:
+            veg_count = int(np.sum(scl_aoi == SCL_VEGETATION))
+            bare_count = int(np.sum(scl_aoi == SCL_NOT_VEGETATED))
+        unclassified_count = max(0, n_aoi - (veg_count + bare_count + water_count))
+
+        surface_fractions = {
+            "vegetation": round(float(veg_count / n_aoi), 3) if n_aoi > 0 else 0.0,
+            "bare_surface": round(float(bare_count / n_aoi), 3) if n_aoi > 0 else 0.0,
+            "water_surface": round(float(water_count / n_aoi), 3) if n_aoi > 0 else 0.0,
+            "unclassified": round(float(unclassified_count / n_aoi), 3) if n_aoi > 0 else 0.0,
+        }
+    elif ndvi is not None and n_index_usable > 0:
+        usable_ndvi = ndvi[index_usable_mask]
         veg_count = int(np.sum(usable_ndvi >= 0.25))
         bare_count = int(np.sum((usable_ndvi >= 0.0) & (usable_ndvi < 0.25)))
         water_count = int(np.sum(usable_ndvi < 0.0))
-        unclassified_count = n_aoi - n_usable
+        unclassified_count = max(0, n_aoi - (veg_count + bare_count + water_count))
 
         surface_fractions = {
             "vegetation": round(float(veg_count / n_aoi), 3) if n_aoi > 0 else 0.0,
@@ -685,6 +882,7 @@ def _compute_indices(
 
     return {
         "ndvi": ndvi,
+        "crop_ndvi": crop_ndvi,
         "ndmi": ndmi,
         "ndre": ndre,
         "indices_quality": indices_quality,
@@ -692,7 +890,9 @@ def _compute_indices(
         "valid_pixels_pct": valid_pct,
         "quality_metrics": quality_eval["metrics"],
         "pixel_counts": quality_eval["counts"],
-        "usable_mask": usable_mask,
+        "usable_mask": crop_usable_mask,
+        "crop_usable_mask": crop_usable_mask,
+        "index_usable_mask": index_usable_mask,
     }
 
 
@@ -762,10 +962,15 @@ def geo_agent(state: PipelineState) -> PipelineState:
             "cloud": [8, 9, 10],
             "shadow": [2, 3],
             "nodata_defective": [0, 1],
+            "water_excluded_from_crop": [6],
+            "unclassified_excluded_from_crop": [7],
+            "snow_excluded_from_crop": [11],
         },
         "masking_disclaimer": (
             "Pixel-level cloud masking is derived from the Sentinel-2 L2A Scene Classification Layer (SCL) "
-            "at 20m native resolution resampled to 10m. SCL is an automated algorithmic classification "
+            "at 20m native resolution resampled via NEAREST-neighbour to 10m. Continuous bands (B05, B11) use "
+            "BILINEAR interpolation. Water (SCL 6) and unclassified (SCL 7) surfaces are excluded from agricultural "
+            "crop-health summaries to prevent diagnostic distortion. SCL is an automated algorithmic classification "
             "and does not provide 100% cloud detection accuracy; residual thin cirrus or cloud edges may occasionally remain undetected."
         ),
     }
@@ -774,6 +979,7 @@ def geo_agent(state: PipelineState) -> PipelineState:
         **state,
         "raster": raster,
         "ndvi": indices["ndvi"],
+        "crop_ndvi": indices.get("crop_ndvi"),
         "ndmi": indices["ndmi"],
         "ndre": indices["ndre"],
         "indices_quality": indices["indices_quality"],

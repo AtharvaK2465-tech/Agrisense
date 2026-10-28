@@ -124,7 +124,10 @@ def validate_live_sentinel_integration(
         print(f"    Cloud+Shadow Masked: {qm.get('cloud_shadow_fraction_pct', 0.0):.1f}% of AOI")
     else:
         print(f"    Cloud Masking:       Unavailable ({qm.get('cloud_masking_reason', 'SCL missing')})")
-    print(f"    Usable Pixels:       {counts.get('usable_pixels', 0)} ({qm.get('usable_pixel_pct', 0.0):.1f}% of AOI)")
+    if qm.get("water_fraction_pct") is not None and qm.get("water_fraction_pct") > 0:
+        print(f"    Water Pixels (Non-Crop): {counts.get('water_pixels', 0)} ({qm.get('water_fraction_pct', 0.0):.1f}% of AOI)")
+    print(f"    Crop-Suitable Pixels:{counts.get('crop_usable_pixels', counts.get('usable_pixels', 0))} ({qm.get('crop_usable_pixel_pct', qm.get('usable_pixel_pct', 0.0)):.1f}% of AOI)")
+    print(f"    Index-Usable Pixels: {counts.get('index_usable_pixels', 0)} ({qm.get('index_usable_pixel_pct', 0.0):.1f}% of AOI)")
 
     print("\n--> Spectral Indices Analytical Verification (Usable Pixels Only):")
     if ndvi is not None and np.any(np.isfinite(ndvi)):
