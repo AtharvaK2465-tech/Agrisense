@@ -312,8 +312,8 @@ def evaluate_pixel_quality(
         cloud_reason = "Scene Classification Layer (SCL) not present; pixel-level cloud masking unavailable."
         shadow_reason = "Scene Classification Layer (SCL) not present; shadow masking unavailable."
 
-    index_usable_pct = round((n_index_usable / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
-    crop_usable_pct = round((n_crop_usable / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
+    index_usable_pct = round((n_index_usable / n_aoi * 100.0), 4) if n_aoi > 0 else 0.0
+    crop_usable_pct = round((n_crop_usable / n_aoi * 100.0), 4) if n_aoi > 0 else 0.0
     usable_pct = crop_usable_pct
     usable_of_acquired_pct = round((n_crop_usable / n_data_valid * 100.0), 2) if n_data_valid > 0 else 0.0
 
@@ -740,6 +740,12 @@ def _compute_indices(
     num_bands = raster.shape[-1]
     indices_quality: Dict[str, Any] = {}
 
+    # Extract SCL and data_mask from raster if not passed explicitly
+    if scl is None and raster.shape[-1] >= 7:
+        scl = raster[..., 6]
+    if data_mask is None and raster.shape[-1] >= 8:
+        data_mask = raster[..., 7]
+
     # Evaluate comprehensive pixel quality across all 6 categories
     quality_eval = evaluate_pixel_quality(
         raster,
@@ -873,17 +879,17 @@ def _compute_indices(
         if crop_ndvi is not None and n_crop_usable > 0:
             crop_vals = crop_ndvi[crop_usable_mask]
             veg_count = int(np.sum(crop_vals >= 0.25))
-            bare_count = int(np.sum((crop_vals >= 0.0) & (crop_vals < 0.25)))
+            bare_count = int(np.sum(crop_vals < 0.25))
         else:
             veg_count = int(np.sum(scl_aoi == SCL_VEGETATION))
             bare_count = int(np.sum(scl_aoi == SCL_NOT_VEGETATED))
         unclassified_count = max(0, n_aoi - (veg_count + bare_count + water_count))
 
         surface_fractions = {
-            "vegetation": round(float(veg_count / n_aoi), 3) if n_aoi > 0 else 0.0,
-            "bare_surface": round(float(bare_count / n_aoi), 3) if n_aoi > 0 else 0.0,
-            "water_surface": round(float(water_count / n_aoi), 3) if n_aoi > 0 else 0.0,
-            "unclassified": round(float(unclassified_count / n_aoi), 3) if n_aoi > 0 else 0.0,
+            "vegetation": round(float(veg_count / n_aoi), 4) if n_aoi > 0 else 0.0,
+            "bare_surface": round(float(bare_count / n_aoi), 4) if n_aoi > 0 else 0.0,
+            "water_surface": round(float(water_count / n_aoi), 4) if n_aoi > 0 else 0.0,
+            "unclassified": round(float(unclassified_count / n_aoi), 4) if n_aoi > 0 else 0.0,
         }
     elif ndvi is not None and n_index_usable > 0:
         usable_ndvi = ndvi[index_usable_mask]
@@ -893,10 +899,10 @@ def _compute_indices(
         unclassified_count = max(0, n_aoi - (veg_count + bare_count + water_count))
 
         surface_fractions = {
-            "vegetation": round(float(veg_count / n_aoi), 3) if n_aoi > 0 else 0.0,
-            "bare_surface": round(float(bare_count / n_aoi), 3) if n_aoi > 0 else 0.0,
-            "water_surface": round(float(water_count / n_aoi), 3) if n_aoi > 0 else 0.0,
-            "unclassified": round(float(unclassified_count / n_aoi), 3) if n_aoi > 0 else 0.0,
+            "vegetation": round(float(veg_count / n_aoi), 4) if n_aoi > 0 else 0.0,
+            "bare_surface": round(float(bare_count / n_aoi), 4) if n_aoi > 0 else 0.0,
+            "water_surface": round(float(water_count / n_aoi), 4) if n_aoi > 0 else 0.0,
+            "unclassified": round(float(unclassified_count / n_aoi), 4) if n_aoi > 0 else 0.0,
         }
     else:
         surface_fractions = {

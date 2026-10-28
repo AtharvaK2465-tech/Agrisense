@@ -234,3 +234,52 @@ def test_shadow_precision_preservation():
     assert metrics["shadow_fraction_pct"] > 0.0
 
 
+def test_compute_indices_scl_unpacking_and_surface_partition():
+    """Verify that _compute_indices unpacks SCL from 8-band rasters and produces exact mutually exclusive fractions."""
+    from agents.geo_agent import _compute_indices
+
+    # 10x10 raster = 100 pixels
+    raster = np.zeros((10, 10, 8), dtype=np.float32)
+    # 60 pixels of active vegetation (SCL 4, NDVI = 0.6)
+    raster[:6, :, 0] = 0.1  # Red
+    raster[:6, :, 3] = 0.4  # NIR
+    raster[:6, :, 6] = 4.0  # SCL Vegetation
+    raster[:6, :, 7] = 1.0  # dataMask
+
+    # 30 pixels of bare ground (SCL 5, NDVI = 0.1)
+    raster[6:9, :, 0] = 0.2
+    raster[6:9, :, 3] = 0.25
+    raster[6:9, :, 6] = 5.0  # SCL Bare Soil
+    raster[6:9, :, 7] = 1.0
+
+    # 8 pixels of unclassified (SCL 7)
+    raster[9, :8, 0] = 0.15
+    raster[9, :8, 3] = 0.15
+    raster[9, :8, 6] = 7.0  # SCL Unclassified
+    raster[9, :8, 7] = 1.0
+
+    # 2 pixels of dark area / cast shadow (SCL 2)
+    raster[9, 8:, 0] = 0.05
+    raster[9, 8:, 3] = 0.05
+    raster[9, 8:, 6] = 2.0  # SCL Dark Area / Shadow
+    raster[9, 8:, 7] = 1.0
+
+    # Call _compute_indices without passing scl explicitly
+    res = _compute_indices(raster)
+    fracs = res["surface_fractions"]
+    qm = res["quality_metrics"]
+
+    # Verify SCL was unpacked: water is 0, not false-positive from NDVI
+    assert fracs["water_surface"] == 0.0
+    assert fracs["vegetation"] == 0.60
+    assert fracs["bare_surface"] == 0.30
+    assert fracs["unclassified"] == 0.10  # 8 SCL 7 + 2 SCL 2 = 10 pixels
+    total_frac = sum(fracs.values())
+    assert pytest.approx(total_frac, abs=1e-4) == 1.0
+
+    # Verify index-usable percentage reflects exclusion of 2 shadow pixels (98 / 100 = 98.0%)
+    assert qm["index_usable_pixel_pct"] == 98.0
+    # Agricultural usable excludes SCL 7 and SCL 2 (90 / 100 = 90.0%)
+    assert qm["crop_usable_pixel_pct"] == 90.0
+
+
