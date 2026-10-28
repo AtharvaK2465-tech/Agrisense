@@ -20,6 +20,7 @@ class PipelineState(TypedDict, total=False):
     indices_quality: Optional[dict]  # status and availability metadata for ndvi, ndmi, ndre
     surface_fractions: Optional[dict]  # vegetation, bare_soil, water, unclassified fractions
     valid_pixels_pct: Optional[float]
+    quality_metrics: Optional[dict]    # pixel-level quality metrics (AOI coverage, nodata, cloud, shadow, usable)
     cloud_cover_pct: Optional[float]
     query_attempts: int            # tracks re-query loop count
     geo_fallback_note: Optional[str]  # set if a live Sentinel Hub call failed and fell back to mock

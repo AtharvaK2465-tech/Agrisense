@@ -104,37 +104,53 @@ def validate_live_sentinel_integration(
     print(f"    Raster Shape:      {raster.shape} (H x W x Bands)")
     print(f"    Raster Data Type:  {raster.dtype}")
 
-    # Step 5: Spectral Indices Computation
-    indices = _compute_indices(raster, is_synthetic=False)
+    # Step 5: Spectral Indices Computation with Quality & Cloud Masking
+    indices = _compute_indices(raster, is_synthetic=False, polygon_geojson=poly)
     ndvi = indices.get("ndvi")
     ndmi = indices.get("ndmi")
     ndre = indices.get("ndre")
     fractions = indices.get("surface_fractions", {})
+    qm = indices.get("quality_metrics", {})
+    counts = indices.get("pixel_counts", {})
 
-    print("\n--> Spectral Indices Analytical Verification:")
-    if ndvi is not None:
-        mean_ndvi = float(ndvi.mean())
-        print(f"    [+] NDVI (Vigor):       Mean = {mean_ndvi:+.3f} (Min: {float(ndvi.min()):+.3f}, Max: {float(ndvi.max()):+.3f})")
+    print("\n--> Sentinel-2 Pixel Quality & Cloud Masking Metrics:")
+    print(f"    Total Grid Pixels:   {counts.get('grid_pixels', 0)} ({qm.get('aoi_coverage_denominator', 'Grid')})")
+    print(f"    AOI Pixels:          {counts.get('aoi_pixels', 0)} ({qm.get('aoi_pixel_coverage_pct', 0.0):.1f}% AOI coverage)")
+    print(f"    Source Data Avail:   {counts.get('source_data_valid_pixels', 0)} ({qm.get('source_data_availability_pct', 0.0):.1f}% of AOI)")
+    print(f"    No-Data / Off-Swath: {counts.get('nodata_pixels', 0)} ({qm.get('nodata_fraction_pct', 0.0):.1f}% of AOI)")
+    if qm.get("cloud_fraction_pct") is not None:
+        print(f"    Cloud Pixels:        {counts.get('cloud_pixels', 0)} ({qm.get('cloud_fraction_pct', 0.0):.1f}% of AOI)")
+        print(f"    Shadow Pixels:       {counts.get('shadow_pixels', 0)} ({qm.get('shadow_fraction_pct', 0.0):.1f}% of AOI)")
+        print(f"    Cloud+Shadow Masked: {qm.get('cloud_shadow_fraction_pct', 0.0):.1f}% of AOI")
+    else:
+        print(f"    Cloud Masking:       Unavailable ({qm.get('cloud_masking_reason', 'SCL missing')})")
+    print(f"    Usable Pixels:       {counts.get('usable_pixels', 0)} ({qm.get('usable_pixel_pct', 0.0):.1f}% of AOI)")
+
+    print("\n--> Spectral Indices Analytical Verification (Usable Pixels Only):")
+    if ndvi is not None and np.any(np.isfinite(ndvi)):
+        mean_ndvi = float(np.nanmean(ndvi))
+        print(f"    [+] NDVI (Vigor):       Mean = {mean_ndvi:+.3f} (Min: {float(np.nanmin(ndvi)):+.3f}, Max: {float(np.nanmax(ndvi)):+.3f})")
     else:
         print(f"    [-] NDVI: Unavailable ({indices['indices_quality']['ndvi']['reason']})")
 
-    if ndmi is not None:
-        mean_ndmi = float(ndmi.mean())
-        print(f"    [+] NDMI (Moisture):    Mean = {mean_ndmi:+.3f} (Min: {float(ndmi.min()):+.3f}, Max: {float(ndmi.max()):+.3f})")
+    if ndmi is not None and np.any(np.isfinite(ndmi)):
+        mean_ndmi = float(np.nanmean(ndmi))
+        print(f"    [+] NDMI (Moisture):    Mean = {mean_ndmi:+.3f} (Min: {float(np.nanmin(ndmi)):+.3f}, Max: {float(np.nanmax(ndmi)):+.3f})")
     else:
         print(f"    [-] NDMI: Unavailable ({indices['indices_quality']['ndmi']['reason']})")
 
-    if ndre is not None:
-        mean_ndre = float(ndre.mean())
-        print(f"    [+] NDRE (RedEdge):     Mean = {mean_ndre:+.3f} (Min: {float(ndre.min()):+.3f}, Max: {float(ndre.max()):+.3f})")
+    if ndre is not None and np.any(np.isfinite(ndre)):
+        mean_ndre = float(np.nanmean(ndre))
+        print(f"    [+] NDRE (RedEdge):     Mean = {mean_ndre:+.3f} (Min: {float(np.nanmin(ndre)):+.3f}, Max: {float(np.nanmax(ndre)):+.3f})")
     else:
         print(f"    [-] NDRE: Unavailable ({indices['indices_quality']['ndre']['reason']})")
 
-    print(f"\n--> Surface Canopy Fractions:")
+    print(f"\n--> Surface Canopy Fractions (Relative to Total AOI):")
     print(f"    Active Vegetation:   {fractions.get('vegetation', 0.0):.1%}")
     print(f"    Bare Ground/Fallow:  {fractions.get('bare_surface', 0.0):.1%}")
     print(f"    Water Surface:       {fractions.get('water_surface', 0.0):.1%}")
-    print(f"    Valid Coverage:      {indices.get('valid_pixels_pct', 0.0):.1f}%")
+    print(f"    Masked / Excluded:   {fractions.get('unclassified', 0.0):.1%}")
+    print(f"    Usable Coverage:     {indices.get('valid_pixels_pct', 0.0):.1f}%")
 
     print("\n=================================================================")
     print("[AGRISENSE] Live Sentinel-2 Validation Result: SUCCESS")
@@ -145,6 +161,7 @@ def validate_live_sentinel_integration(
         "scene_meta": scene_meta,
         "indices_quality": indices["indices_quality"],
         "surface_fractions": fractions,
+        "quality_metrics": qm,
         "exit_code": 0,
     }
 

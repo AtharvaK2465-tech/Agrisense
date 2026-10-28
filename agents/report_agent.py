@@ -48,6 +48,13 @@ def _format_indices_summary(state: PipelineState) -> str:
     else:
         lines.append(f"- **NDRE:** Unavailable ({ndre_q.get('reason', 'Red-edge band not available')})")
 
+    # Cloud Masking
+    c_mask = quality.get("cloud_masking", {})
+    if isinstance(c_mask, dict) and c_mask.get("status") == "active":
+        lines.append(f"- **Cloud & Shadow Masking:** Active ({c_mask.get('method', 'ESA SCL')})")
+    elif isinstance(c_mask, dict) and c_mask.get("status") == "unavailable":
+        lines.append(f"- **Cloud & Shadow Masking:** Unavailable ({c_mask.get('reason', 'SCL not provided')})")
+
     return "\n".join(lines)
 
 
@@ -60,6 +67,14 @@ def _mock_report(state: PipelineState, advisory_matches: List[Dict[str, Any]], i
     veg_pct = surface.get("vegetation", 0.0) * 100
     bare_pct = surface.get("bare_surface", 0.0) * 100
     water_pct = surface.get("water_surface", 0.0) * 100
+
+    qm = state.get("quality_metrics") or prov.get("quality_metrics") or {}
+    cloud_shadow_info = ""
+    if qm.get("cloud_shadow_fraction_pct") is not None:
+        cloud_shadow_info = f" | Cloud/Shadow Masked: {qm.get('cloud_shadow_fraction_pct', 0.0):.1f}%"
+    nodata_info = ""
+    if qm.get("nodata_fraction_pct") is not None:
+        nodata_info = f" | Nodata/Off-Swath: {qm.get('nodata_fraction_pct', 0.0):.1f}%"
 
     # Baseline text
     baseline_status = state.get("baseline_status", "unavailable")
@@ -84,7 +99,13 @@ def _mock_report(state: PipelineState, advisory_matches: List[Dict[str, Any]], i
     else:
         footer = "*Note: Generated using deterministic template on live Copernicus Sentinel-2 observations.*"
 
-    if state.get("crop_type") == "no_crop" or state.get("is_non_agri") or "No Crop" in state.get("diagnosis", ""):
+    if "Insufficient Usable Imagery" in state.get("diagnosis", ""):
+        rec_text = (
+            "Acquisition window did not provide sufficient cloud-free satellite pixels for reliable canopy index calculation. "
+            "Expand the search date range or conduct physical ground scouting."
+        )
+        header_title = "Satellite Observation Notice — Insufficient Cloud-Free Data"
+    elif state.get("crop_type") == "no_crop" or state.get("is_non_agri") or "No Crop" in state.get("diagnosis", ""):
         rec_text = (
             "No agricultural intervention required. The selected boundary corresponds to non-agricultural "
             "or built-up surface (educational campus ground, residential, industrial, or open water) where crops "
@@ -133,7 +154,7 @@ def _mock_report(state: PipelineState, advisory_matches: List[Dict[str, Any]], i
 ### Spectral Indices & Surface Breakdown
 {_format_indices_summary(state)}
 - **Surface Fractions:** Active Vegetation: {veg_pct:.1f}% | Bare Ground/Fallow: {bare_pct:.1f}% | Water: {water_pct:.1f}%
-- **Valid Pixel Coverage:** {state.get('valid_pixels_pct', 100.0):.1f}%
+- **Valid Usable Pixel Coverage:** {state.get('valid_pixels_pct', 100.0):.1f}% (Denominator: AOI pixels){cloud_shadow_info}{nodata_info}
 
 ### Temporal Baseline Context
 {baseline_text}

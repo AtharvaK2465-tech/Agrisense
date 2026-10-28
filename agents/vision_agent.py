@@ -13,16 +13,28 @@ from agents.state import PipelineState
 LABELS = ["healthy", "water_stress", "nutrient_deficiency", "disease", "no_crop"]
 
 
-def _heuristic_classify(ndvi: np.ndarray, ndmi: np.ndarray, is_non_agri: bool = False) -> tuple[str, float]:
+def _heuristic_classify(ndvi: np.ndarray, ndmi: np.ndarray = None, is_non_agri: bool = False) -> tuple[str, float]:
     """A simple, explainable stand-in classifier based on mean index values
     and how much of the scene falls below a stress threshold. Replace with
     `_model_predict` once a trained CNN is available."""
     if is_non_agri:
         return "no_crop", 0.95
 
-    mean_ndvi = float(np.mean(ndvi))
-    stressed_fraction = float(np.mean(ndvi < 0.3))
-    mean_ndmi = float(np.mean(ndmi)) if ndmi is not None else None
+    if ndvi is None:
+        return "unavailable", 0.0
+
+    usable_ndvi = ndvi[np.isfinite(ndvi)]
+    if len(usable_ndvi) == 0:
+        return "unavailable", 0.0
+
+    mean_ndvi = float(np.mean(usable_ndvi))
+    stressed_fraction = float(np.mean(usable_ndvi < 0.3))
+
+    if ndmi is not None:
+        usable_ndmi = ndmi[np.isfinite(ndmi)]
+        mean_ndmi = float(np.mean(usable_ndmi)) if len(usable_ndmi) > 0 else None
+    else:
+        mean_ndmi = None
 
     if stressed_fraction < 0.05:
         return "healthy", round(float(0.9 - stressed_fraction), 3)
@@ -55,8 +67,15 @@ def vision_agent(state: PipelineState) -> PipelineState:
     if state.get("error"):
         return state
 
+    if state.get("crop_decision_status") == "unavailable":
+        return {
+            **state,
+            "vision_classification": "unavailable",
+            "vision_confidence": 0.0,
+        }
+
     is_non_agri = bool(state.get("is_non_agri", False)) or (state.get("crop_type") == "no_crop") or (state.get("crop_decision_status") == "no_crop")
-    label, confidence = _heuristic_classify(state["ndvi"], state["ndmi"], is_non_agri=is_non_agri)
+    label, confidence = _heuristic_classify(state.get("ndvi"), state.get("ndmi"), is_non_agri=is_non_agri)
 
     return {
         **state,

@@ -36,7 +36,14 @@ def reasoning_agent(state: PipelineState) -> PipelineState:
     diagnosis = classification
     risk_level = "low"
 
-    if classification == "no_crop" or state.get("crop_type") == "no_crop" or state.get("is_non_agri"):
+    if classification == "unavailable" or state.get("crop_decision_status") == "unavailable":
+        diagnosis = "Insufficient Usable Imagery (Cloud Obscured / No-Data)"
+        risk_level = "low"
+        reasoning_lines.append(
+            "Satellite observation contains insufficient usable clear-sky pixels due to heavy cloud obscuration, "
+            "shadow contamination, or swath boundary limits. Field inspection recommended to assess crop status directly."
+        )
+    elif classification == "no_crop" or state.get("crop_type") == "no_crop" or state.get("is_non_agri"):
         diagnosis = "No Crop Detected (Non-Agricultural Ground)"
         risk_level = "low"
         ground_ctx = state.get("ground_context") or "Non-agricultural / built-up / campus ground"
