@@ -22,7 +22,8 @@ from agents.state import PipelineState
 # ---------------------------------------------------------------------------
 SCL_NO_DATA = 0                      # Missing / nodata / out-of-swath
 SCL_SATURATED_OR_DEFECTIVE = 1       # Saturated or defective sensor pixels
-SCL_CAST_SHADOW = 2                  # Topographic cast shadows / dark features
+SCL_DARK_AREA_PIXELS = 2             # SCL Class 2: Dark area pixels (topographic cast shadows and dark features)
+SCL_CAST_SHADOW = SCL_DARK_AREA_PIXELS  # Standard alias
 SCL_CLOUD_SHADOWS = 3                # Cloud shadows cast onto ground
 SCL_VEGETATION = 4                   # Clear green vegetation
 SCL_NOT_VEGETATED = 5                # Bare soils, rocks, built-up areas
@@ -287,19 +288,19 @@ def evaluate_pixel_quality(
 
     # Fractions and explicit denominators
     aoi_coverage_pct = round((n_aoi / n_grid * 100.0), 2) if n_grid > 0 else 0.0
-    source_avail_pct = round((n_data_valid / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
-    nodata_pct = round((n_nodata / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
+    source_avail_pct = round((n_data_valid / n_aoi * 100.0), 4) if n_aoi > 0 else 0.0
+    nodata_pct = round((n_nodata / n_aoi * 100.0), 4) if n_aoi > 0 else 0.0
 
     if scl is not None:
-        cloud_pct = round((n_cloud / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
-        shadow_pct = round((n_shadow / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
-        cloud_shadow_pct = round(((n_cloud + n_shadow) / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
-        defective_pct = round((n_defective / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
-        water_pct = round((n_water / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
-        scl7_pct = round((n_scl7 / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
-        snow_pct = round((n_snow / n_aoi * 100.0), 2) if n_aoi > 0 else 0.0
+        cloud_pct = round((n_cloud / n_aoi * 100.0), 4) if n_aoi > 0 else 0.0
+        shadow_pct = round((n_shadow / n_aoi * 100.0), 4) if n_aoi > 0 else 0.0
+        cloud_shadow_pct = round(((n_cloud + n_shadow) / n_aoi * 100.0), 4) if n_aoi > 0 else 0.0
+        defective_pct = round((n_defective / n_aoi * 100.0), 4) if n_aoi > 0 else 0.0
+        water_pct = round((n_water / n_aoi * 100.0), 4) if n_aoi > 0 else 0.0
+        scl7_pct = round((n_scl7 / n_aoi * 100.0), 4) if n_aoi > 0 else 0.0
+        snow_pct = round((n_snow / n_aoi * 100.0), 4) if n_aoi > 0 else 0.0
         cloud_reason = "Sentinel-2 L2A SCL classes 8 (Medium Cloud), 9 (High Cloud), 10 (Thin Cirrus)"
-        shadow_reason = "Sentinel-2 L2A SCL classes 2 (Cast Shadow), 3 (Cloud Shadow)"
+        shadow_reason = "Sentinel-2 L2A SCL classes 2 (Dark Area Pixels / Cast Shadow), 3 (Cloud Shadow)"
     else:
         cloud_pct = None
         shadow_pct = None
@@ -334,6 +335,7 @@ def evaluate_pixel_quality(
         "counts": {
             "grid_pixels": n_grid,
             "aoi_pixels": n_aoi,
+            "outside_aoi_pixels": n_grid - n_aoi,
             "nodata_pixels": n_nodata,
             "source_data_valid_pixels": n_data_valid,
             "invalid_band_pixels": n_invalid_bands,
@@ -350,6 +352,8 @@ def evaluate_pixel_quality(
         "metrics": {
             "aoi_pixel_coverage_pct": aoi_coverage_pct,
             "aoi_coverage_denominator": "Total raster grid pixels (H x W)",
+            "outside_aoi_pixel_pct": round(((n_grid - n_aoi) / n_grid * 100.0), 2) if n_grid > 0 else 0.0,
+            "outside_aoi_denominator": "Total raster grid pixels (H x W)",
             "source_data_availability_pct": source_avail_pct,
             "source_data_availability_denominator": "Total AOI pixels",
             "nodata_fraction_pct": nodata_pct,

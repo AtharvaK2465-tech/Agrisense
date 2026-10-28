@@ -42,26 +42,59 @@ def polygon_from_geojson(geojson: Any) -> BaseGeometry:
     raise ValueError(f"Unsupported geometry type: {type(geojson)}")
 
 
-def point_radius_to_geojson(lat: float, lon: float, radius_km: float = 1.0) -> dict:
-    """Generates a regular bounding polygon from a center point and radius in kilometers."""
+def point_radius_to_geojson(lat: float, lon: float, radius_km: float = 1.0, as_circle: bool = True) -> dict:
+    """
+    Generates an AOI geometry from a center point and radius in kilometers.
+    
+    If as_circle=True (default):
+      Constructs a true metric circular polygon using an Azimuthal Equidistant (AEQD)
+      projection centered at (lat, lon) with metric radius (radius_km * 1000.0 m)
+      and 32 quad segments (128 vertices), then projects back to WGS84 (EPSG:4326).
+      This avoids degree-buffering distortion and accurately models a circular field parcel.
+    If as_circle=False:
+      Constructs the axis-aligned bounding box enclosing the circular buffer.
+    """
+    from shapely.geometry import mapping
+    if as_circle:
+        try:
+            import pyproj
+            from shapely.geometry import Point
+            from shapely.ops import transform
+            aeqd = pyproj.CRS(f"+proj=aeqd +lat_0={lat} +lon_0={lon} +datum=WGS84 +units=m")
+            wgs84 = pyproj.CRS("EPSG:4326")
+            project_to_wgs84 = pyproj.Transformer.from_crs(aeqd, wgs84, always_xy=True).transform
+            circle_m = Point(0, 0).buffer(radius_km * 1000.0, quad_segs=32)
+            circle_geo = transform(project_to_wgs84, circle_m)
+            return mapping(circle_geo)
+        except Exception:
+            pass  # Fall back to box if projection fails
+
     delta_lat = radius_km / _KM_PER_DEG_LAT
     delta_lon = radius_km / _KM_PER_DEG_LON
     poly = box(lon - delta_lon, lat - delta_lat, lon + delta_lon, lat + delta_lat)
-    from shapely.geometry import mapping
     return mapping(poly)
 
 
 def approx_area_km2(geom: BaseGeometry) -> float:
-    """Calculates approximate area in square kilometers accounting for latitude."""
+    """
+    Calculates accurate geodesic area in square kilometers on the WGS84 ellipsoid.
+    Falls back to spherical/cosine approximation if pyproj is unavailable.
+    """
     if geom.is_empty:
         return 0.0
-    minx, miny, maxx, maxy = geom.bounds
-    mean_lat = (miny + maxy) / 2.0
-    import math
-    km_per_deg_lon = math.cos(math.radians(mean_lat)) * 111.32
-    deg_area = geom.area  # in square degrees
-    km2 = deg_area * _KM_PER_DEG_LAT * km_per_deg_lon
-    return abs(float(km2))
+    try:
+        import pyproj
+        geod = pyproj.Geod(ellps="WGS84")
+        area, _ = geod.geometry_area_perimeter(geom)
+        return abs(float(area)) / 1e6
+    except Exception:
+        minx, miny, maxx, maxy = geom.bounds
+        mean_lat = (miny + maxy) / 2.0
+        import math
+        km_per_deg_lon = math.cos(math.radians(mean_lat)) * 111.32
+        deg_area = geom.area  # in square degrees
+        km2 = deg_area * _KM_PER_DEG_LAT * km_per_deg_lon
+        return abs(float(km2))
 
 
 def validate_polygon(geojson: Any) -> Tuple[bool, str]:

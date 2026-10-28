@@ -143,3 +143,94 @@ def test_geo_agent_earth_search_dispatch():
         assert prov["scene_id"] == "S2B_43QGB_20240205_0_L2A"
         assert out["valid_pixels_pct"] > 90.0
 
+
+def test_circular_aoi_metric_buffering_and_area():
+    """Verify that point_radius_to_geojson creates an exact metric circular buffer with ~12.56 km2 area."""
+    from utils.geo import point_radius_to_geojson, approx_area_km2
+    from shapely.geometry import shape
+
+    circle_geojson = point_radius_to_geojson(19.72, 77.12, radius_km=2.0, as_circle=True)
+    assert circle_geojson["type"] == "Polygon"
+    coords = circle_geojson["coordinates"][0]
+    # 32 quad segments produce 129 coordinates (first == last)
+    assert len(coords) >= 120
+
+    geom = shape(circle_geojson)
+    area_km2 = approx_area_km2(geom)
+    expected_area = np.pi * (2.0 ** 2)  # ~12.56637 km2
+    assert 12.50 <= area_km2 <= 12.60
+    assert abs(area_km2 - expected_area) < 0.02
+
+
+def test_outside_aoi_pixels_excluded_from_metrics():
+    """Verify that pixels outside the AOI geometry are strictly excluded from quality and index statistics."""
+    from agents.geo_agent import evaluate_pixel_quality, _compute_aoi_mask, _compute_indices
+    from utils.geo import point_radius_to_geojson
+
+    aoi = point_radius_to_geojson(19.72, 77.12, radius_km=2.0, as_circle=True)
+    from shapely.geometry import shape
+    bounds = shape(aoi).bounds
+    aoi_mask = _compute_aoi_mask(aoi, (100, 100), bbox=bounds)
+    assert 0 < aoi_mask.sum() < 10000
+
+    # Create synthetic raster: inside is all valid vegetation (SCL 4), outside is high cloud (SCL 9) and water (SCL 6)
+    raster = np.zeros((100, 100, 8), dtype=np.float32)
+    # B04, B03, B02, B08, B11, B05, SCL, dataMask
+    # Set inside AOI: NIR=0.5, Red=0.1, SCL=4, dataMask=1
+    inside = (aoi_mask == 1)
+    raster[inside, 0] = 0.10  # Red
+    raster[inside, 3] = 0.50  # NIR
+    raster[inside, 6] = 4.0   # SCL Vegetation
+    raster[inside, 7] = 1.0   # dataMask
+
+    # Set outside AOI: extreme values, cloud SCL 9, shadow SCL 3, dataMask 0
+    outside = ~inside
+    raster[outside, 0] = 0.90
+    raster[outside, 3] = 0.05
+    raster[outside, 6] = 9.0  # High probability cloud
+    raster[outside, 7] = 0.0  # Invalid
+
+    res = evaluate_pixel_quality(raster, polygon_geojson=aoi, bbox=bounds)
+    counts = res["counts"]
+    metrics = res["metrics"]
+
+    # All inside pixels are usable vegetation
+    assert counts["aoi_pixels"] == int(inside.sum())
+    assert counts["outside_aoi_pixels"] == int(outside.sum())
+    assert counts["grid_pixels"] == 10000
+    assert counts["cloud_pixels"] == 0
+    assert counts["shadow_pixels"] == 0
+    assert metrics["cloud_fraction_pct"] == 0.0
+    assert metrics["usable_pixel_pct"] == 100.0
+
+    # Verify spectral indices inside AOI are unaffected by outside extreme values
+    out_indices = _compute_indices(raster, polygon_geojson=aoi, bbox=bounds)
+    expected_ndvi = (0.50 - 0.10) / (0.50 + 0.10)  # ~0.6667
+    actual_crop_ndvi = float(np.nanmean(out_indices["crop_ndvi"]))
+    assert abs(actual_crop_ndvi - expected_ndvi) < 1e-4
+
+
+def test_shadow_precision_preservation():
+    """Verify that small fractional shadow occurrences (e.g. 4/125600 = 0.0032%) do not round to 0.0%."""
+    from agents.geo_agent import evaluate_pixel_quality
+
+    # 125,600 pixels inside AOI
+    raster = np.zeros((355, 354, 8), dtype=np.float32)
+    raster[..., 6] = 4.0  # All SCL Vegetation
+    raster[..., 7] = 1.0  # dataMask valid
+
+    # Inject exactly 4 cast shadow pixels (SCL 2)
+    raster[0, 0, 6] = 2.0
+    raster[0, 1, 6] = 2.0
+    raster[0, 2, 6] = 2.0
+    raster[0, 3, 6] = 2.0
+
+    res = evaluate_pixel_quality(raster)
+    counts = res["counts"]
+    metrics = res["metrics"]
+    assert counts["shadow_pixels"] == 4
+    # 4 / (355*354) * 100 = 0.0031829... -> rounded to 4 decimals = 0.0032
+    assert metrics["shadow_fraction_pct"] == 0.0032
+    assert metrics["shadow_fraction_pct"] > 0.0
+
+
