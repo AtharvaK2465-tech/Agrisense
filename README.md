@@ -1,4 +1,4 @@
-# Multi-Agent Crop Health Monitoring — Maharashtra
+# Multi-Agent Crop Health Monitoring - Maharashtra
 
 Satellite-imagery-based crop disease/stress detection for a user-selected
 area of Maharashtra, built as a LangGraph multi-agent pipeline with a
